@@ -1,0 +1,37 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/twm/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "autoReload": {"enable": true,},
+            "env": {"WANDB_MODE":"disabled","WANDB_SILENT":"true",},
+            "args": [
+                // "--game=Craftax-Symbolic-AutoReset-v1",
+                "--game=Breakout",
+                "--config=test",
+            ]
+        },
+        {
+            "name": "run",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/twm/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "autoReload": {"enable": true,},
+            "args": [
+                "--wandb='enabled'",
+                // "--game=Craftax-Symbolic-AutoReset-v1",
+                "--game=Breakout",
+            ]
+        }
+    ]
+}

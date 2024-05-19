@@ -6,12 +6,16 @@ import numpy as np
 import torch
 import torchvision
 from PIL import ImageDraw
-
+from loguru import logger
 import wandb
-from agent import Agent, Dreamer
-from replay_buffer import ReplayBuffer
+from tqdm.auto import tqdm
+from twm.agent import Agent, Dreamer
+from twm.replay_buffer import ReplayBuffer
+from twm import utils
 
-import utils
+
+logger.remove()
+logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
 
 class Trainer:
@@ -116,13 +120,13 @@ class Trainer:
         config = self.config
         replay_buffer = self.replay_buffer
 
-        log_every = 20
+        log_every = 200
         self.last_eval = 0
         self.total_eval_time = 0
 
-        # prefill the buffer with randomly collected data
+        logger.info("prefill the buffer with randomly collected data")
         random_policy = lambda index: replay_buffer.sample_random_action()
-        for _ in range(config['buffer_prefill'] - 1):
+        for _ in tqdm(range(config['buffer_prefill'] - 1)):
             replay_buffer.step(random_policy)
             metrics = {}
             utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
@@ -151,45 +155,49 @@ class Trainer:
         train_every = (replay_buffer.capacity - config['buffer_prefill']) / num_batches
 
         step_counter = 0
-        while replay_buffer.size < replay_buffer.capacity:
-            # collect data in real environment
-            collect_policy = self._create_buffer_obs_policy()
-            should_log = False
-            while step_counter <= train_every and replay_buffer.size < replay_buffer.capacity:
-                if replay_buffer.size - self.last_eval >= config['eval_every']:
-                    metrics = self._evaluate(is_final=False)
-                    utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
-                    self.summarizer.append(metrics)
-                    wandb.log(self.summarizer.summarize())
+        logger.info("collect data in real environment")
+        with tqdm(total=replay_buffer.capacity, unit='step', desc='train') as pbar:
+            while replay_buffer.size < replay_buffer.capacity:
+                collect_policy = self._create_buffer_obs_policy()
+                should_log = False
+                while step_counter <= train_every and replay_buffer.size < replay_buffer.capacity:
+                    if replay_buffer.size - self.last_eval >= config['eval_every']:
+                        metrics = self._evaluate(is_final=False)
+                        utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+                        self.summarizer.append(metrics)
+                        wandb.log(self.summarizer.summarize())
 
-                replay_buffer.step(collect_policy)
-                step_counter += 1
+                    replay_buffer.step(collect_policy)
+                    step_counter += 1
 
-                if replay_buffer.size % log_every == 0:
+                    if replay_buffer.size % log_every == 0:
+                        should_log = True
+
+                # train world model and actor-critic
+                metrics_hist = []
+                while step_counter >= train_every:
+                    step_counter -= train_every
+                    metrics = self._train_step()
+                    metrics_hist.append(metrics)
+
+                metrics = utils.mean_metrics(metrics_hist)
+                utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+
+                # evaluate
+                if replay_buffer.size - self.last_eval >= config['eval_every'] and \
+                        replay_buffer.size < replay_buffer.capacity:
+                    eval_metrics = self._evaluate(is_final=False)
+                    metrics.update(eval_metrics)
                     should_log = True
 
-            # train world model and actor-critic
-            metrics_hist = []
-            while step_counter >= train_every:
-                step_counter -= train_every
-                metrics = self._train_step()
-                metrics_hist.append(metrics)
+                self.summarizer.append(metrics)
+                if should_log:
+                    s = self.summarizer.summarize()
+                    wandb.log(s)
+                    logger.debug(s)
+                pbar.update_to(replay_buffer.size)
 
-            metrics = utils.mean_metrics(metrics_hist)
-            utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
-
-            # evaluate
-            if replay_buffer.size - self.last_eval >= config['eval_every'] and \
-                    replay_buffer.size < replay_buffer.capacity:
-                eval_metrics = self._evaluate(is_final=False)
-                metrics.update(eval_metrics)
-                should_log = True
-
-            self.summarizer.append(metrics)
-            if should_log:
-                wandb.log(self.summarizer.summarize())
-
-        # final evaluation
+        logger.info("final evaluation")
         metrics = self._evaluate(is_final=True)
         utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
         self.summarizer.append(metrics)
@@ -211,7 +219,7 @@ class Trainer:
         ac = agent.ac
         replay_buffer = self.replay_buffer
 
-        # pretrain observation model
+        logger.info("pretrain observation model")
         wm_total_batch_size = config['wm_batch_size'] * config['wm_sequence_length']
         budget = config['pretrain_budget'] * config['pretrain_obs_p']
         while budget > 0:
@@ -230,11 +238,11 @@ class Trainer:
         with torch.no_grad():
             z_dist = obs_model.eval().encode(o)
 
-        # pretrain dynamics model
+        logger.info("pretrain dynamics model")
         budget = config['pretrain_budget'] * config['pretrain_dyn_p']
         while budget > 0:
-            for idx in replay_buffer.generate_uniform_indices(
-                    config['wm_batch_size'], config['wm_sequence_length'], extra=2):  # 2 for context + next
+            for idx in tqdm(replay_buffer.generate_uniform_indices(
+                    config['wm_batch_size'], config['wm_sequence_length'], extra=2)):  # 2 for context + next
                 z, logits = obs_model.sample_z(z_dist, idx=idx.flatten(), return_logits=True)
                 z, logits = [x.squeeze(1).unflatten(0, idx.shape) for x in (z, logits)]
                 z = z[:, :-1]
@@ -246,11 +254,11 @@ class Trainer:
                 if budget <= 0:
                     break
 
-        # pretrain ac
+        logger.info("pretrain ac")
         budget = config['pretrain_budget'] * (1 - config['pretrain_obs_p'] + config['pretrain_dyn_p'])
         while budget > 0:
-            for idx in replay_buffer.generate_uniform_indices(
-                    config['ac_batch_size'], config['ac_horizon'], extra=2):  # 2 for context + next
+            for idx in tqdm(replay_buffer.generate_uniform_indices(
+                    config['ac_batch_size'], config['ac_horizon'], extra=2)):  # 2 for context + next
                 z = obs_model.sample_z(z_dist, idx=idx.flatten())
                 z = z.squeeze(1).unflatten(0, idx.shape)
                 idx = idx[:, :-2]

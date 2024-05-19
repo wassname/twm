@@ -1,3 +1,8 @@
+A fork to try
+- pretrained LLM's vs plain
+- craftax
+
+Original repository:
 # Transformer-based World Models Are Happy With 100k Interactions (ICLR 2023)
 
 Currently WIP.

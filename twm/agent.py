@@ -1,10 +1,10 @@
 import torch
 from torch import nn
 
-from actor_critic import ActorCritic
-from world_model import WorldModel
-import utils
-
+from twm.actor_critic import ActorCritic
+from twm.world_model import WorldModel
+import twm.utils
+from jaxtyping import Float
 
 class Agent(nn.Module):
 

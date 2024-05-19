@@ -3,11 +3,12 @@ import math
 import torch
 import torch.nn.functional as F
 import torch.distributions as D
-from torch import nn
+from torch import nn, Tensor
+from jaxtyping import Float
+from typing import Optional, Tuple
 from torch.distributions.utils import logits_to_probs
-
-import nets
-import utils
+from twm.custom_types import Obs, Z_dist, Z, Logits, Terminated, Reward, Action, G
+from twm import utils, nets
 
 
 class WorldModel(nn.Module):
@@ -35,7 +36,7 @@ class WorldModel(nn.Module):
     def h_dim(self):
         return self.dyn_model.h_dim
 
-    def optimize_pretrain_obs(self, o):
+    def optimize_pretrain_obs(self, o: Float[Tensor, 'b 1 c h w']):
         obs_model = self.obs_model
         obs_model.train()
 
@@ -54,7 +55,7 @@ class WorldModel(nn.Module):
         metrics['obs_loss'] = obs_loss.detach()
         return metrics
 
-    def optimize_pretrain_dyn(self, z, a, r, terminated, truncated, target_logits):
+    def optimize_pretrain_dyn(self, z: Z, a: Action, r: Reward, terminated: Terminated, truncated, target_logits: Logits):
         assert utils.same_batch_shape([z, a, r, terminated, truncated])
         assert utils.same_batch_shape_time_offset(z, target_logits, 1)
         dyn_model = self.dyn_model
@@ -163,11 +164,11 @@ class ObservationModel(nn.Module):
         )
 
     @staticmethod
-    def create_z_dist(logits, temperature=1):
+    def create_z_dist(logits: Logits, temperature=1) -> Z_dist:
         assert temperature > 0
         return D.Independent(D.OneHotCategoricalStraightThrough(logits=logits / temperature), 1)
 
-    def encode(self, o):
+    def encode(self, o: Obs) -> Z_dist:
         assert utils.check_no_grad(o)
         config = self.config
         shape = o.shape[:2]
@@ -183,7 +184,7 @@ class ObservationModel(nn.Module):
         z_dist = ObservationModel.create_z_dist(z_logits)
         return z_dist
 
-    def sample_z(self, z_dist, reparameterized=False, temperature=1, idx=None, return_logits=False):
+    def sample_z(self, z_dist: Z_dist, reparameterized=False, temperature=1, idx=None, return_logits=False) -> Z:
         logits = z_dist.base_dist.logits
         assert (not reparameterized) == utils.check_no_grad(logits)
         if temperature == 0:
@@ -210,11 +211,11 @@ class ObservationModel(nn.Module):
             return z, logits
         return z
 
-    def encode_sample(self, o, reparameterized=False, temperature=1, idx=None, return_logits=False):
+    def encode_sample(self, o: Obs, reparameterized=False, temperature=1, idx=None, return_logits=False) -> Z:
         z_dist = self.encode(o)
         return self.sample_z(z_dist, reparameterized, temperature, idx, return_logits)
 
-    def decode(self, z):
+    def decode(self, z: Z) -> Obs:
         config = self.config
         shape = z.shape[:2]
         z = z.flatten(0, 1)
@@ -225,7 +226,7 @@ class ObservationModel(nn.Module):
         recons = recons.unflatten(0, shape)
         return recons
 
-    def compute_decoder_loss(self, recons, o):
+    def compute_decoder_loss(self, recons: Obs, o: Obs):
         assert utils.check_no_grad(o)
         config = self.config
         metrics = {}
@@ -244,7 +245,7 @@ class ObservationModel(nn.Module):
         metrics['recon_mae'] = torch.abs(o - recon_mean.detach()).mean()
         return loss, metrics
 
-    def compute_entropy_loss(self, z_dist):
+    def compute_entropy_loss(self, z_dist: Z_dist):
         config = self.config
         metrics = {}
 
@@ -326,7 +327,10 @@ class DynamicsModel(nn.Module):
     def h_dim(self):
         return self.prediction_net.embed_dim
 
-    def predict(self, z, a, r, g, d, tgt_length, heads=None, mems=None, return_attention=False,
+    def predict(self, z: Z, a: Action, r: Reward, g: G, d: Terminated, tgt_length: int, 
+                heads: Optional[Tuple[str]]=None, 
+                mems=None, 
+                return_attention=False,
                 compute_consistency=False):
         assert utils.check_no_grad(z, a, r, g, d)
         assert mems is None or utils.check_no_grad(*mems)
@@ -379,6 +383,9 @@ class DynamicsModel(nn.Module):
             preds['g_dist'] = g_dist  # used for dynamics loss
             preds['g'] = g_pred
 
+        # z 'b tgt_len z' 100 17 1024
+        # Mem: Float[Tensor, 'heads?=50 b=100 d=256']
+        # Mems: List[Mem]=11 (layers?)
         return (preds, h, mems, attention) if return_attention else (preds, h, mems)
 
     def compute_dynamics_loss(self, preds, h, target_logits, target_r, target_g, target_weights):

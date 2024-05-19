@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.distributions as D
-
+from twm.custom_types import Obs
 import utils
 
 
@@ -102,7 +102,7 @@ class ReplayBuffer:
             return x.to(device=device)
         return x
 
-    def get_obs(self, idx, device=None, prefix=0, return_next=False):
+    def get_obs(self, idx, device=None, prefix=0, return_next=False) -> Obs:
         obs = self._get(self.obs, idx, device, prefix, return_next=return_next, allow_last=True)
         return utils.preprocess_atari_obs(obs, device)
 

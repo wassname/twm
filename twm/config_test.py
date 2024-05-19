@@ -97,5 +97,3 @@ CONFIGS['default'] = {
     'critic_grad_clip': 1,
     'critic_target_interval': 1
 }
-
-CONFIGS['test'] = {**CONFIGS['default'], 'pretrain_budget': 50000, 'eval_every': 500, 'env_time_limit': 2700 }

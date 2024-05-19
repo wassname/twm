@@ -8,6 +8,7 @@ from torch import nn, optim
 from ale_py.roms.utils import rom_name_to_id
 from ale_py.env.gym import AtariEnv
 from wandb.sdk.data_types.base_types.wb_value import WBValue
+from loguru import logger
 
 
 def update_metrics(metrics, new_metrics, prefix=None):
@@ -67,6 +68,7 @@ class MetricsSummarizer:
     def summarize(self):
         summary = mean_metrics(self.metrics_history, except_keys=self.except_keys)
         self.metrics_history = []
+        # logger.debug(summary)
         return summary
 
 

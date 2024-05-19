@@ -4,9 +4,9 @@ from functools import lru_cache
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-
-import utils
+from torch import nn, Tensor
+from jaxtyping import Float, Int, Bool
+from twm import utils
 
 
 def get_activation(nonlinearity, param=None):
@@ -585,7 +585,7 @@ class PredictionNet(nn.Module):
         src_mask[idx] = True
         return src_mask
 
-    def forward(self, inputs, tgt_length, stop_mask, heads=None, mems=None, return_attention=False):
+    def forward(self, inputs, tgt_length: int, stop_mask: Float[Tensor, 'b s'], heads: Optional[Tuple[str]]=None, mems=None, return_attention=False):
         modality_order = self.modality_order
         num_modalities = len(modality_order)
         num_current = self.num_current

@@ -4,9 +4,9 @@ import math
 import torch
 import torch.distributions as D
 from torch import nn
-
-import nets
-import utils
+from typing import Optional
+from twm import nets, utils
+from twm.custom_types import Reward, G, Terminated, Obs, Z, Logits, Action, Hiddens, Values
 
 
 class ActorCritic(nn.Module):
@@ -63,7 +63,7 @@ class ActorCritic(nn.Module):
         logits = self.actor_model(x.flatten(0, 1)).unflatten(0, shape)
         return logits
 
-    def critic(self, x):
+    def critic(self, x) -> Values:
         shape = x.shape[:2]
         values = self.critic_model(x.flatten(0, 1)).squeeze(-1).unflatten(0, shape)
         return values
@@ -152,7 +152,7 @@ class ActorCritic(nn.Module):
         return loss, metrics
 
     @torch.no_grad()
-    def _compute_gae(self, r, g, values, dones=None):
+    def _compute_gae(self, r: Reward, g: G, values:G, dones:Optional[Terminated]=None):
         assert utils.same_batch_shape([r, g])
         assert dones is None or utils.same_batch_shape([r, dones])
         assert utils.same_batch_shape_time_offset(values, r, 1)

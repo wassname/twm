@@ -6,16 +6,20 @@ import numpy as np
 import torch
 import wandb
 
-from config import CONFIGS
-from trainer import Trainer
+# experimenting... https://docs.kidger.site/jaxtyping/api/runtime-type-checking/
+from jaxtyping import install_import_hook
+from beartype import beartype as typechecker
+with install_import_hook("main", "beartype.beartype"):
+    from twm.config import CONFIGS
+    from twm.trainer import Trainer
 
 
 def main(args=None):
     if args is None:
         parser = argparse.ArgumentParser()
-        parser.add_argument('--game', type=str)
+        parser.add_argument('--game', type=str, default="Breakout")
         parser.add_argument('--config', type=str, default='default')
-        parser.add_argument('--seed', type=int, default=None)
+        parser.add_argument('--seed', type=int, default=42)
         parser.add_argument('--device', type=str, default='cuda')
         parser.add_argument('--buffer_device', type=str, default=None)
         parser.add_argument('--cpu_p', type=float, default=0.5)

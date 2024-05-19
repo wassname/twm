@@ -5,8 +5,8 @@ import gym
 import numpy as np
 import torch
 
-from agent import Agent, Dreamer
-import utils
+from twm.agent import Agent, Dreamer
+from twm import utils, nets
 
 
 class DreamEnv(gym.Env):
