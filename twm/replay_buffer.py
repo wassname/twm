@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 import torch.distributions as D
 from twm.custom_types import Obs
-from twm import utils
+from twm import utils, metrics
 from twm.envs.atari import create_reward_transform, preprocess_atari_obs
 
 
@@ -150,7 +150,7 @@ class ReplayBuffer:
         self.obs[index + 1] = torch.as_tensor(np.array(next_obs), device=self.device)
         self.rewards[index] = self.reward_transform(reward)
         self.actions[index] = action
-        self.terminated[index] = torch.as_tensor(np.array(terminated))
+        self.terminated[index] = terminated
         self.truncated[index] = truncated
         self.timesteps[index + 1] = 0 if (terminated or truncated) else (self.timesteps[index] + 1)
 
@@ -237,12 +237,12 @@ class ReplayBuffer:
 
     def metrics(self):
         num_episodes = len(self.episode_lengths)
-        metrics = {'size': self.size, 'total_reward': self.total_reward, 'num_episodes': num_episodes,
+        metrics_d = {'size': self.size, 'total_reward': self.total_reward, 'num_episodes': num_episodes,
                    'visit_ent': self.compute_visit_entropy()}
 
         if num_episodes > self.metrics_num_episodes:
             new_episodes = num_episodes - self.metrics_num_episodes
             self.metrics_num_episodes = num_episodes
-            metrics.update({'episode_len': utils.compute_mean(self.episode_lengths[-new_episodes:]),
+            metrics_d.update({'episode_len': metrics.compute_mean(self.episode_lengths[-new_episodes:]),
                             'episode_score': np.mean(self.scores[-new_episodes:])})
-        return metrics
+        return metrics_d

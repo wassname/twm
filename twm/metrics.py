@@ -1,10 +1,11 @@
 import collections
 import torch
+import numpy as np
 from wandb.sdk.data_types.base_types.wb_value import WBValue
 
 def update_metrics(metrics, new_metrics, prefix=None):
     def process(key, t):
-        if isinstance(t, (int, float)):
+        if isinstance(t, (int, float, np.integer, np.floating)):
             return t
         assert torch.is_tensor(t), key
         assert not t.requires_grad, key

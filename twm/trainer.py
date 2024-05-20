@@ -134,23 +134,23 @@ class Trainer:
         random_policy = lambda index: replay_buffer.sample_random_action()
         for _ in tqdm(range(config['buffer_prefill'] - 1)):
             replay_buffer.step(random_policy)
-            metrics = {}
-            metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
-            self.summarizer.append(metrics)
+            metrics_d = {}
+            metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+            self.summarizer.append(metrics_d)
             if replay_buffer.size % log_every == 0:
                 wandb.log(self.summarizer.summarize())
 
         # final prefill step
         replay_buffer.step(random_policy)
-        metrics = {}
-        metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+        metrics_d = {}
+        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
 
         # pretrain on the prefilled data
         self._pretrain()
 
         eval_metrics = self._evaluate(is_final=False)
         metrics.update(eval_metrics)
-        self.summarizer.append(metrics)
+        self.summarizer.append(metrics_d)
         wandb.log(self.summarizer.summarize())
 
         budget = config['budget'] - config['pretrain_budget']
@@ -168,9 +168,9 @@ class Trainer:
                 should_log = False
                 while step_counter <= train_every and replay_buffer.size < replay_buffer.capacity:
                     if replay_buffer.size - self.last_eval >= config['eval_every']:
-                        metrics = self._evaluate(is_final=False)
-                        metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
-                        self.summarizer.append(metrics)
+                        metrics_d = self._evaluate(is_final=False)
+                        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+                        self.summarizer.append(metrics_d)
                         wandb.log(self.summarizer.summarize())
 
                     replay_buffer.step(collect_policy)
@@ -183,11 +183,11 @@ class Trainer:
                 metrics_hist = []
                 while step_counter >= train_every:
                     step_counter -= train_every
-                    metrics = self._train_step()
-                    metrics_hist.append(metrics)
+                    metrics_d = self._train_step()
+                    metrics_hist.append(metrics_d)
 
-                metrics = metrics.mean_metrics(metrics_hist)
-                metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+                metrics_d = metrics.mean_metrics(metrics_hist)
+                metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
 
                 # evaluate
                 if replay_buffer.size - self.last_eval >= config['eval_every'] and \
@@ -196,7 +196,7 @@ class Trainer:
                     metrics.update(eval_metrics)
                     should_log = True
 
-                self.summarizer.append(metrics)
+                self.summarizer.append(metrics_d)
                 if should_log:
                     s = self.summarizer.summarize()
                     wandb.log(s)
@@ -204,9 +204,9 @@ class Trainer:
                 pbar.update_to(replay_buffer.size)
 
         logger.info("final evaluation")
-        metrics = self._evaluate(is_final=True)
-        metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
-        self.summarizer.append(metrics)
+        metrics_d = self._evaluate(is_final=True)
+        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+        self.summarizer.append(metrics_d)
         wandb.log(self.summarizer.summarize())
         self.print_stats()
 

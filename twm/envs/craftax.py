@@ -13,7 +13,7 @@ from craftax.craftax.renderer import render_craftax_pixels, render_craftax_text
 from craftax.craftax.constants import Action
 from gymnasium.wrappers import FrameStack, TimeLimit
 from gymnax.wrappers import GymnaxToGymWrapper
-
+import torch
 
 # class Gymax2GymWrapper(gym.Wrapper):
 #     """
@@ -90,11 +90,18 @@ from gymnax.wrappers import GymnaxToGymWrapper
     # keys_to_action = env.get_keys_to_action()
 
 
+def from_jax(t):
+    return torch.as_tensor(t.tolist())
+
 class CraftaxCompatWrapper(gym.Wrapper):
     
-    # def step(self, *args, **kwargs):
-    #     next_obs, reward, terminated, truncated, info =  self.env.step(*args, **kwargs)
-    #     return next_obs, reward, terminated, truncated.tolist(), info
+    def step(self, *args, **kwargs):
+        next_obs, reward, terminated, truncated, info =  self.env.step(*args, **kwargs)
+        return from_jax(next_obs), from_jax(reward), from_jax(terminated), from_jax(truncated), info
+    
+    def reset(self, *args, **kwargs):
+        obs, state = self.env.reset(*args, **kwargs)
+        return from_jax(obs), state
     
     def get_action_meanings(self) -> Dict[int, str]:
         return {i:s for s,i in Action.__members__.items()}
