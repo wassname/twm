@@ -11,7 +11,9 @@ import wandb
 from tqdm.auto import tqdm
 from twm.agent import Agent, Dreamer
 from twm.replay_buffer import ReplayBuffer
-from twm import utils
+from twm import utils, metrics
+from twm.envs.atari import preprocess_atari_obs, create_atari_env, create_vector_env, compute_atari_hns, NoAutoReset
+from twm.envs.craftax import create_craftax_env
 
 
 logger.remove()
@@ -36,7 +38,7 @@ class Trainer:
 
         # metrics that won't be summarized, the last value will be used instead
         except_keys = ['buffer/size', 'buffer/total_reward', 'buffer/num_episodes']
-        self.summarizer = utils.MetricsSummarizer(except_keys=except_keys)
+        self.summarizer = metrics.MetricsSummarizer(except_keys=except_keys)
         self.last_eval = 0
         self.total_eval_time = 0
 
@@ -61,11 +63,15 @@ class Trainer:
     @staticmethod
     def _create_env_from_config(config, eval=False):
         noop_max = 0 if eval else config['env_noop_max']
-        env = utils.create_atari_env(
+        # env = create_atari_env(
+        #     config['game'], noop_max, config['env_frame_skip'], config['env_frame_stack'],
+        #     config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'])
+        env = create_craftax_env(
             config['game'], noop_max, config['env_frame_skip'], config['env_frame_stack'],
             config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'])
         if eval:
-            env = utils.NoAutoReset(env)  # must use options={'force': True} to really reset
+            # FIXME: make it work for crafter
+            env = NoAutoReset(env)  # must use options={'force': True} to really reset
         return env
 
     def _create_buffer_obs_policy(self):
@@ -129,7 +135,7 @@ class Trainer:
         for _ in tqdm(range(config['buffer_prefill'] - 1)):
             replay_buffer.step(random_policy)
             metrics = {}
-            utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+            metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
             self.summarizer.append(metrics)
             if replay_buffer.size % log_every == 0:
                 wandb.log(self.summarizer.summarize())
@@ -137,7 +143,7 @@ class Trainer:
         # final prefill step
         replay_buffer.step(random_policy)
         metrics = {}
-        utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+        metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
 
         # pretrain on the prefilled data
         self._pretrain()
@@ -163,7 +169,7 @@ class Trainer:
                 while step_counter <= train_every and replay_buffer.size < replay_buffer.capacity:
                     if replay_buffer.size - self.last_eval >= config['eval_every']:
                         metrics = self._evaluate(is_final=False)
-                        utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+                        metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
                         self.summarizer.append(metrics)
                         wandb.log(self.summarizer.summarize())
 
@@ -180,8 +186,8 @@ class Trainer:
                     metrics = self._train_step()
                     metrics_hist.append(metrics)
 
-                metrics = utils.mean_metrics(metrics_hist)
-                utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+                metrics = metrics.mean_metrics(metrics_hist)
+                metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
 
                 # evaluate
                 if replay_buffer.size - self.last_eval >= config['eval_every'] and \
@@ -199,9 +205,10 @@ class Trainer:
 
         logger.info("final evaluation")
         metrics = self._evaluate(is_final=True)
-        utils.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
+        metrics.update_metrics(metrics, replay_buffer.metrics(), prefix='buffer/')
         self.summarizer.append(metrics)
         wandb.log(self.summarizer.summarize())
+        self.print_stats()
 
         # save final model
         if config['save']:
@@ -295,7 +302,7 @@ class Trainer:
                 replay_buffer.get_data(idx, device=device, prefix=1, return_next_obs=True)  # 1 for context
 
             z, h, met = wm.optimize(o, a, r, terminated, truncated)
-            utils.update_metrics(metrics_i, met, prefix='wm/')
+            metrics.update_metrics(metrics_i, met, prefix='wm/')
 
             o, a, r, terminated, truncated = [x[:, :-1] for x in (o, a, r, terminated, truncated)]
 
@@ -323,7 +330,7 @@ class Trainer:
         if config['wm_discount_threshold'] == 0:
             d = None  # save some computation, since all dones are False in this case
         ac_metrics = ac.optimize(z, h, a, r, g, d, weights)
-        utils.update_metrics(metrics, ac_metrics, prefix='ac/')
+        metrics.update_metrics(metrics, ac_metrics, prefix='ac/')
 
         return metrics
 
@@ -349,11 +356,11 @@ class Trainer:
         num_episodes = config['final_eval_episodes'] if is_final else config['eval_episodes']
         num_envs = max(min(num_episodes, int(multiprocessing.cpu_count() * config['cpu_p'])), 1)
         env_fn = lambda: Trainer._create_env_from_config(config, eval=True)
-        eval_env = utils.create_vector_env(num_envs, env_fn)
+        eval_env = create_vector_env(num_envs, env_fn)
 
         seed = ((config['seed'] + 13) * 7919 + 13) if config['seed'] is not None else None
         start_obs, _ = eval_env.reset(seed=seed)
-        start_obs = utils.preprocess_atari_obs(start_obs, device).unsqueeze(1)
+        start_obs = preprocess_atari_obs(start_obs, device).unsqueeze(1)
 
         dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
         dreamer.observe_reset_single(start_obs)
@@ -377,7 +384,7 @@ class Trainer:
                     elif terminated[i] and lives[i] == 0:
                         finished[i] = True
 
-            o = utils.preprocess_atari_obs(o, device).unsqueeze(1)
+            o = preprocess_atari_obs(o, device).unsqueeze(1)
             r = torch.as_tensor(r, dtype=torch.float, device=device).unsqueeze(1)
             terminated = torch.as_tensor(terminated, device=device).unsqueeze(1)
             truncated = torch.as_tensor(truncated, device=device).unsqueeze(1)
@@ -396,7 +403,7 @@ class Trainer:
                 if seed is not None:
                     seed = seed * 3 + 13 + num_envs
                 start_o, _ = eval_env.reset(seed=seed, options={'force': True})
-                start_o = utils.preprocess_atari_obs(start_o, device).unsqueeze(1)
+                start_o = preprocess_atari_obs(start_o, device).unsqueeze(1)
                 dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
                 dreamer.observe_reset_single(start_o)
         eval_env.close(terminate=True)
@@ -410,7 +417,7 @@ class Trainer:
             'score_median': np.median(scores),
             'score_min': np.min(scores),
             'score_max': np.max(scores),
-            'hns': utils.compute_atari_hns(config['game'], score_mean)
+            'hns': compute_atari_hns(config['game'], score_mean)
         }
         metrics.update({f'eval/{key}': value for key, value in score_metrics.items()})
         if is_final:

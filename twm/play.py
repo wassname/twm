@@ -7,6 +7,7 @@ import torch
 
 from twm.agent import Agent, Dreamer
 from twm import utils, nets
+from twm.envs.atari import preprocess_atari_obs
 
 
 class DreamEnv(gym.Env):
@@ -40,7 +41,8 @@ class DreamEnv(gym.Env):
         self.observation_space = gym.spaces.Tuple([z_space, h_space])
         self.action_space = gym.spaces.Discrete(wm.num_actions)
 
-        start_o_env = gym.make(f'{config["game"]}NoFrameskip-v4')
+        # FIXME: to crafter
+        start_o_env = gym.make(f'{config["game"]}')
         start_o_env = gym.wrappers.AtariPreprocessing(
             start_o_env, noop_max=0, frame_skip=config['env_frame_skip'], screen_size=config['env_frame_size'],
             terminal_on_life_loss=False, grayscale_obs=config['env_grayscale'])
@@ -64,7 +66,7 @@ class DreamEnv(gym.Env):
             n = n.item()
         o = np.array([self.start_o_env.reset()[0] for _ in range(n)])
         device = next(obs_model.parameters()).device
-        o = utils.preprocess_atari_obs(o, device).unsqueeze(0).unsqueeze(1)
+        o = preprocess_atari_obs(o, device).unsqueeze(0).unsqueeze(1)
         with torch.no_grad():
             z = obs_model.encode_sample(o, temperature=0)
         return z
@@ -75,7 +77,7 @@ class DreamEnv(gym.Env):
         obs_model = self.wm.obs_model.eval()
         device = next(obs_model.parameters()).device
         start_o, _ = self.start_o_env.reset(seed=seed)
-        start_o = utils.preprocess_atari_obs(start_o, device).unsqueeze(0).unsqueeze(1)
+        start_o = preprocess_atari_obs(start_o, device).unsqueeze(0).unsqueeze(1)
         start_z, start_logits = obs_model.encode_sample(start_o, temperature=0, return_logits=True)
         z, h, _, _ = self.dreamer.imagine_reset_single(start_z)
         self.prev_logits = start_logits[:, -1:]
@@ -338,7 +340,8 @@ class RenderWrapper(gym.Wrapper):
 def play_real(config, state_dict, device, user_input, seed):
     zoom = 3
     fps = 60
-    env = gym.make(f'{config["game"]}NoFrameskip-v4', render_mode='rgb_array')
+    # FIXME: to crafter
+    env = gym.make(f'{config["game"]}', render_mode='rgb_array')
     num_actions = env.action_space.n
     keys_to_action = env.get_keys_to_action()
     env = RenderWrapper(env, zoom, fps, keys_to_action)
@@ -368,13 +371,13 @@ def play_real(config, state_dict, device, user_input, seed):
         while not render_wrapper.quit:
             dreamer = Dreamer(config, agent.wm, mode='observe', ac=agent.ac, store_data=False)
             o, _ = env.reset(seed=seed)
-            o = utils.preprocess_atari_obs(o, device).unsqueeze(0).unsqueeze(1)
+            o = preprocess_atari_obs(o, device).unsqueeze(0).unsqueeze(1)
             dreamer.observe_reset_single(o)
 
             while True:
                 a = dreamer.act(epsilon=0)
                 o, r, terminated, truncated, info = env.step(a.item())
-                o = utils.preprocess_atari_obs(o, device).unsqueeze(0).unsqueeze(1)
+                o = preprocess_atari_obs(o, device).unsqueeze(0).unsqueeze(1)
                 r = torch.as_tensor([[r]], dtype=torch.float, device=device)
                 terminated = torch.as_tensor([[terminated]], device=device)
                 truncated = torch.as_tensor([[terminated]], device=device)
@@ -386,7 +389,8 @@ def play_real(config, state_dict, device, user_input, seed):
 
 
 def play_dream(config, state_dict, device, user_input, render_frame_stack, render_extra, seed):
-    tmp_env = gym.make(f'{config["game"]}NoFrameskip-v4')
+    # FIXME: to crafter
+    tmp_env = gym.make(f'{config["game"]}')
     tmp_env = tmp_env.unwrapped
     num_actions = tmp_env.action_space.n
     keys_to_action = tmp_env.get_keys_to_action()

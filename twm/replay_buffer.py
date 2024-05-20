@@ -6,7 +6,8 @@ import torch
 import torch.nn.functional as F
 import torch.distributions as D
 from twm.custom_types import Obs
-import utils
+from twm import utils
+from twm.envs.atari import create_reward_transform, preprocess_atari_obs
 
 
 class ReplayBuffer:
@@ -38,7 +39,7 @@ class ReplayBuffer:
         self.score = 0
         self.episode_lengths = []
         self.scores = []
-        self.reward_transform = utils.create_reward_transform(config['env_reward_transform'])
+        self.reward_transform = create_reward_transform(config['env_reward_transform'])
         self.metrics_num_episodes = 0
 
     def sample_random_action(self):
@@ -104,7 +105,7 @@ class ReplayBuffer:
 
     def get_obs(self, idx, device=None, prefix=0, return_next=False) -> Obs:
         obs = self._get(self.obs, idx, device, prefix, return_next=return_next, allow_last=True)
-        return utils.preprocess_atari_obs(obs, device)
+        return preprocess_atari_obs(obs, device)
 
     def get_actions(self, idx, device=None, prefix=0):
         return self._get(self.actions, idx, device, prefix, repeat_fill_value=0)  # noop
@@ -149,7 +150,7 @@ class ReplayBuffer:
         self.obs[index + 1] = torch.as_tensor(np.array(next_obs), device=self.device)
         self.rewards[index] = self.reward_transform(reward)
         self.actions[index] = action
-        self.terminated[index] = terminated
+        self.terminated[index] = torch.as_tensor(np.array(terminated))
         self.truncated[index] = truncated
         self.timesteps[index + 1] = 0 if (terminated or truncated) else (self.timesteps[index] + 1)
 

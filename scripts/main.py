@@ -17,7 +17,7 @@ with install_import_hook("main", "beartype.beartype"):
 def main(args=None):
     if args is None:
         parser = argparse.ArgumentParser()
-        parser.add_argument('--game', type=str, default="Breakout")
+        parser.add_argument('--game', type=str, default="Craftax-Symbolic-v1")
         parser.add_argument('--config', type=str, default='default')
         parser.add_argument('--seed', type=int, default=42)
         parser.add_argument('--device', type=str, default='cuda')

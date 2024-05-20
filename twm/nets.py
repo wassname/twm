@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from jaxtyping import Float, Int, Bool
 from twm import utils
+from typing import Optional, Tuple
 
 
 def get_activation(nonlinearity, param=None):

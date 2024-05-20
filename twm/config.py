@@ -1,6 +1,7 @@
 CONFIGS = {}
 
-CONFIGS['default'] = {
+CONFIGS['default'] = {    
+    
     # buffer
     'buffer_capacity': 100000,
     'buffer_temperature': 20.0,

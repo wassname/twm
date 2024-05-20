@@ -31,10 +31,16 @@ gymnasium = {version = "^0.29.1", extras = ["atari", "accept-rom-license", "othe
 jaxtyping = "^0.2.2"
 # typeguard = "^4.2.20"
 beartype = "^0.18.5"
+jax = {version = "^0.4.28", source = "jax", extras = ["cuda12_pip"]}
 
 [[tool.poetry.source]]
 name = "pytorch"
 url = "https://download.pytorch.org/whl/cu121"
+priority = "explicit"
+
+[[tool.poetry.source]]
+name = "jax"
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
 priority = "explicit"
 
 [tool.poetry.group.dev.dependencies]
