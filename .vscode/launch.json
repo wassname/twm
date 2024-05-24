@@ -17,6 +17,7 @@
                 // "--game=Craftax-Symbolic-AutoReset-v1",
                 "--game=Breakout",
                 "--config=test",
+                "--buffer_device=cpu",
             ]
         },
         {
