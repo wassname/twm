@@ -19,8 +19,8 @@ CONFIGS['default'] = {
     'final_eval_episodes': 100,
 
     # environment
-    'env_frame_size': 64,
-    'env_frame_skip': 4,
+    'env_frame_size': 8268,
+    'env_frame_skip': 1,
     'env_frame_stack': 4,
     'env_grayscale': True,
     'env_noop_max': 30,
@@ -99,4 +99,4 @@ CONFIGS['default'] = {
     'critic_target_interval': 1
 }
 
-CONFIGS['test'] = {**CONFIGS['default'], 'pretrain_budget': 50000, 'eval_every': 500, 'env_time_limit': 2700 }
+CONFIGS['test'] = {**CONFIGS['default'], 'buffer_capacity': 10000, 'buffer_prefill': 1000, 'pretrain_budget': 50000, 'eval_every': 500, 'env_time_limit': 2700 }

@@ -5,8 +5,8 @@ import torch
 import torch.distributions as D
 from torch import nn
 from typing import Optional
-from twm import nets, utils
-from twm.custom_types import Reward, G, Terminated, Obs, Z, Logits, Action, Hiddens, Values
+from twm import nets, utils, metrics
+from twm.custom_types import TrcFloat, TrcFloat, TrcBool, Obs, Z, Logits, TrceInt, Hiddens, TrcFloat
 
 
 class ActorCritic(nn.Module):
@@ -63,7 +63,7 @@ class ActorCritic(nn.Module):
         logits = self.actor_model(x.flatten(0, 1)).unflatten(0, shape)
         return logits
 
-    def critic(self, x) -> Values:
+    def critic(self, x) -> TrcFloat:
         shape = x.shape[:2]
         values = self.critic_model(x.flatten(0, 1)).squeeze(-1).unflatten(0, shape)
         return values
@@ -87,10 +87,10 @@ class ActorCritic(nn.Module):
         actor_loss, actor_metrics = self._compute_actor_loss(logits, a, advantages, weights)
         self.actor_optimizer.step(actor_loss)
 
-        metrics = utils.combine_metrics([critic_metrics, actor_metrics])
+        metrics_d = metrics.combine_metrics([critic_metrics, actor_metrics])
         if d is not None:
-            metrics['num_dones'] = d.sum().detach()  # number of imagined dones
-        return metrics
+            metrics_d['num_dones'] = d.sum().detach()  # number of imagined dones
+        return metrics_d
 
     def optimize_pretrain(self, z, h, r, g, d):
         config = self.config
@@ -118,7 +118,7 @@ class ActorCritic(nn.Module):
         self.actor_optimizer.step(actor_loss)
         self.critic_optimizer.step(critic_loss)
 
-        return utils.combine_metrics([critic_metrics, actor_metrics])
+        return metrics.combine_metrics([critic_metrics, actor_metrics])
 
     def _compute_actor_loss(self, logits, a, advantages, weights):
         assert utils.check_no_grad(a, advantages, weights)
@@ -136,23 +136,23 @@ class ActorCritic(nn.Module):
             entropy_reg = coef * torch.relu(config['actor_entropy_threshold'] - normalized_entropy)
             loss = loss + entropy_reg
 
-        metrics = {
+        metrics_d = {
             'actor_loss': loss.detach(), 'reinforce': reinforce.detach().mean(), 'ent': entropy.detach().mean(),
             'norm_ent': normalized_entropy.detach()
         }
-        return loss, metrics
+        return loss, metrics_d
 
     def _compute_critic_loss(self, values, returns, weights):
         assert utils.check_no_grad(returns, weights)
         value_dist = D.Normal(values, torch.ones_like(values))
         loss = -(weights * value_dist.log_prob(returns)).mean()
         mae = torch.abs(returns - values.detach()).mean()
-        metrics = {'critic_loss': loss.detach(), 'critic_mae': mae, 'critic': values.detach().mean(),
+        metrics_d = {'critic_loss': loss.detach(), 'critic_mae': mae, 'critic': values.detach().mean(),
                    'returns': returns.mean()}
-        return loss, metrics
+        return loss, metrics_d
 
     @torch.no_grad()
-    def _compute_gae(self, r: Reward, g: G, values:G, dones:Optional[Terminated]=None):
+    def _compute_gae(self, r: TrcFloat, g: TrcFloat, values:TrcFloat, dones:Optional[TrcBool]=None) -> TrcFloat :
         assert utils.same_batch_shape([r, g])
         assert dones is None or utils.same_batch_shape([r, dones])
         assert utils.same_batch_shape_time_offset(values, r, 1)

@@ -7,8 +7,8 @@ from torch import nn, Tensor
 from jaxtyping import Float
 from typing import Optional, Tuple
 from torch.distributions.utils import logits_to_probs
-from twm.custom_types import Obs, Z_dist, Z, Logits, Terminated, Reward, Action, G
-from twm import utils, nets
+from twm.custom_types import Obs, Z_dist, Z, Logits, TrcBool, TrcFloat, TrceInt, TrcFloat
+from twm import utils, nets, metrics
 
 
 class WorldModel(nn.Module):
@@ -36,7 +36,7 @@ class WorldModel(nn.Module):
     def h_dim(self):
         return self.dyn_model.h_dim
 
-    def optimize_pretrain_obs(self, o: Float[Tensor, 'b 1 c h w']):
+    def optimize_pretrain_obs(self, o: Float[Tensor, 'b 1 frames odim']):
         obs_model = self.obs_model
         obs_model.train()
 
@@ -51,11 +51,11 @@ class WorldModel(nn.Module):
         obs_loss = dec_loss + ent_loss
         self.obs_optimizer.step(obs_loss)
 
-        metrics = utils.combine_metrics([ent_met, dec_met])
-        metrics['obs_loss'] = obs_loss.detach()
-        return metrics
+        metrics_d = metrics.combine_metrics([ent_met, dec_met])
+        metrics_d['obs_loss'] = obs_loss.detach()
+        return metrics_d
 
-    def optimize_pretrain_dyn(self, z: Z, a: Action, r: Reward, terminated: Terminated, truncated, target_logits: Logits):
+    def optimize_pretrain_dyn(self, z: Z, a: TrceInt, r: TrcFloat, terminated: TrcBool, truncated, target_logits: Logits):
         assert utils.same_batch_shape([z, a, r, terminated, truncated])
         assert utils.same_batch_shape_time_offset(z, target_logits, 1)
         dyn_model = self.dyn_model
@@ -67,10 +67,10 @@ class WorldModel(nn.Module):
         tgt_length = target_logits.shape[1]
 
         preds, h, mems = dyn_model.predict(z, a, r[:, :-1], g[:, :-1], d[:, :-1], tgt_length, compute_consistency=True)
-        dyn_loss, metrics = dyn_model.compute_dynamics_loss(
+        dyn_loss, metrics_d = dyn_model.compute_dynamics_loss(
             preds, h, target_logits=target_logits, target_r=r[:, 1:], target_g=g[:, 1:], target_weights=target_weights)
         self.dyn_optimizer.step(dyn_loss)
-        return metrics
+        return metrics_d
 
     def optimize(self, o, a, r, terminated, truncated):
         assert utils.same_batch_shape([a, r, terminated, truncated])
@@ -118,10 +118,10 @@ class WorldModel(nn.Module):
         obs_loss = dec_loss + ent_loss + con_loss
         self.obs_optimizer.step(obs_loss)
 
-        metrics = utils.combine_metrics([dec_met, ent_met, con_met, dyn_met])
-        metrics['obs_loss'] = obs_loss.detach()
+        metrics_d = metrics.combine_metrics([dec_met, ent_met, con_met, dyn_met])
+        metrics_d['obs_loss'] = obs_loss.detach()
 
-        return z, h, metrics
+        return z, h, metrics_d
 
     @torch.no_grad()
     def to_discounts(self, mask):
@@ -144,23 +144,21 @@ class ObservationModel(nn.Module):
         norm = config['obs_norm']
         dropout_p = config['obs_dropout']
 
-        num_channels = config['env_frame_stack']
-        if not config['env_grayscale']:
-            num_channels *= 3
+        frames = config['env_frame_stack']
+        obs_dim = config['env_frame_size']
+        num_channels = frames * obs_dim
 
+        # A trainable layer that takes us from the obs input to the latent space
         self.encoder = nn.Sequential(
-            nets.CNN(num_channels, [h, h * 2, h * 4], h * 8,
-                     [4, 4, 4, 4], [2, 2, 2, 2], [0, 0, 0, 0], activation, norm=norm, post_activation=True),
             nn.Flatten(),
-            nets.MLP((h * 8) * 2 * 2, [512, 512], self.z_dim, activation, norm=norm, dropout_p=dropout_p)
+            nets.MLP(num_channels, [512, 512], self.z_dim, activation, norm=norm, dropout_p=dropout_p)
         )
 
         # no norm here
+        frames = 4
         self.decoder = nn.Sequential(
-            nets.MLP(self.z_dim, [], (h * 16) * 1 * 1, activation, dropout_p=dropout_p, post_activation=True),
-            nn.Unflatten(1, (h * 16, 1, 1)),
-            nets.TransposeCNN(h * 16, [h * 4, h * 2, h], num_channels, [5, 5, 6, 6], [2, 2, 2, 2], [0, 0, 0, 0],
-                              activation, final_bias_init=0.5)
+            nets.MLP(self.z_dim, [512, 512], num_channels, activation, dropout_p=dropout_p, post_activation=True),
+            nn.Unflatten(1, (frames, num_channels//frames)),
         )
 
     @staticmethod
@@ -173,10 +171,6 @@ class ObservationModel(nn.Module):
         config = self.config
         shape = o.shape[:2]
         o = o.flatten(0, 1)
-
-        if not config['env_grayscale']:
-            o = o.permute(0, 1, 4, 2, 3)
-            o = o.flatten(1, 2)
 
         z_logits = self.encoder(o)
         z_logits = z_logits.unflatten(0, shape)
@@ -229,31 +223,33 @@ class ObservationModel(nn.Module):
     def compute_decoder_loss(self, recons: Obs, o: Obs):
         assert utils.check_no_grad(o)
         config = self.config
-        metrics = {}
-        recon_mean = recons.flatten(0, 1).permute(0, 2, 3, 1)
+        metrics_d = {}
+
+        # put channels/frames last?
+        recon_mean = recons.flatten(0, 1).permute(0, 2, 1)
         coef = config['obs_decoder_coef']
         if coef != 0:
             if config['env_grayscale']:
-                o = o.flatten(0, 1).permute(0, 2, 3, 1)
+                o = o.flatten(0, 1).permute(0, 2, 1)
             else:
-                o = o.flatten(0, 1).permute(0, 2, 3, 1, 4).flatten(-2, -1)
+                o = o.flatten(0, 1).permute(0, 2, 1).flatten(-2, -1)
             recon_dist = D.Independent(D.Normal(recon_mean, torch.ones_like(recon_mean)), 3)
             loss = -coef * recon_dist.log_prob(o).mean()
-            metrics['dec_loss'] = loss.detach()
+            metrics_d['dec_loss'] = loss.detach()
         else:
             loss = torch.zeros(1, device=recons.device, requires_grad=False)
-        metrics['recon_mae'] = torch.abs(o - recon_mean.detach()).mean()
-        return loss, metrics
+        metrics_d['recon_mae'] = torch.abs(o - recon_mean.detach()).mean()
+        return loss, metrics_d
 
     def compute_entropy_loss(self, z_dist: Z_dist):
         config = self.config
-        metrics = {}
+        metrics_d = {}
 
         entropy = z_dist.entropy().mean()
         max_entropy = config['z_categoricals'] * math.log(config['z_categories'])
         normalized_entropy = entropy / max_entropy
-        metrics['z_ent'] = entropy.detach()
-        metrics['z_norm_ent'] = normalized_entropy.detach()
+        metrics_d['z_ent'] = entropy.detach()
+        metrics_d['z_norm_ent'] = normalized_entropy.detach()
 
         coef = config['obs_entropy_coef']
         if coef != 0:
@@ -262,26 +258,26 @@ class ObservationModel(nn.Module):
                 loss = coef * torch.relu(config['obs_entropy_threshold'] - normalized_entropy)
             else:
                 loss = -coef * normalized_entropy
-            metrics['z_entropy_loss'] = loss.detach()
+            metrics_d['z_entropy_loss'] = loss.detach()
         else:
             loss = torch.zeros(1, device=z_dist.base_dist.logits.device, requires_grad=False)
 
-        return loss, metrics
+        return loss, metrics_d
 
     def compute_consistency_loss(self, z_logits, z_hat_probs):
         assert utils.check_no_grad(z_hat_probs)
         config = self.config
-        metrics = {}
+        metrics_d = {}
         coef = config['obs_consistency_coef']
         if coef > 0:
             cross_entropy = -((z_hat_probs.detach() * z_logits).sum(-1))
             cross_entropy = cross_entropy.sum(-1)  # independent
             loss = coef * cross_entropy.mean()
-            metrics['enc_prior_ce'] = cross_entropy.detach().mean()
-            metrics['enc_prior_loss'] = loss.detach()
+            metrics_d['enc_prior_ce'] = cross_entropy.detach().mean()
+            metrics_d['enc_prior_loss'] = loss.detach()
         else:
             loss = torch.zeros(1, device=z_logits.device, requires_grad=False)
-        return loss, metrics
+        return loss, metrics_d
 
 
 class DynamicsModel(nn.Module):
@@ -327,7 +323,7 @@ class DynamicsModel(nn.Module):
     def h_dim(self):
         return self.prediction_net.embed_dim
 
-    def predict(self, z: Z, a: Action, r: Reward, g: G, d: Terminated, tgt_length: int, 
+    def predict(self, z: Z, a: TrceInt, r: TrcFloat, g: TrcFloat, d: TrcBool, tgt_length: int, 
                 heads: Optional[Tuple[str]]=None, 
                 mems=None, 
                 return_attention=False,
@@ -392,9 +388,9 @@ class DynamicsModel(nn.Module):
         assert utils.check_no_grad(target_logits, target_r, target_g, target_weights)
         config = self.config
         losses = []
-        metrics = {}
+        metrics_d = {}
 
-        metrics['h_norm'] = h.norm(dim=-1, p=2).mean().detach()
+        metrics_d['h_norm'] = h.norm(dim=-1, p=2).mean().detach()
 
         if 'z' in preds:
             z_dist = preds['z_dist']
@@ -412,14 +408,14 @@ class DynamicsModel(nn.Module):
                 transition_loss = coef * weighted_cross_entropy
                 losses.append(transition_loss)
 
-                metrics['z_pred_loss'] = transition_loss.detach()
-                metrics['z_pred_ent'] = z_dist.entropy().detach().mean()
-                metrics['z_pred_ce'] = weighted_cross_entropy.detach()
+                metrics_d['z_pred_loss'] = transition_loss.detach()
+                metrics_d['z_pred_ent'] = z_dist.entropy().detach().mean()
+                metrics_d['z_pred_ce'] = weighted_cross_entropy.detach()
 
             # doesn't check for q == 0
             kl = (target_probs * (target_logits - z_logits.detach())).mean()
             kl = F.relu(kl.mean())
-            metrics['z_kl'] = kl
+            metrics_d['z_kl'] = kl
 
         if 'r' in preds:
             r_dist = preds['r_dist']
@@ -428,9 +424,9 @@ class DynamicsModel(nn.Module):
             if coef != 0:
                 r_loss = -coef * r_dist.log_prob(target_r).mean()
                 losses.append(r_loss)
-                metrics['reward_loss'] = r_loss.detach()
-                metrics['reward_mae'] = torch.abs(target_r - r_pred.detach()).mean()
-            metrics['reward'] = r_pred.mean().detach()
+                metrics_d['reward_loss'] = r_loss.detach()
+                metrics_d['reward_mae'] = torch.abs(target_r - r_pred.detach()).mean()
+            metrics_d['reward'] = r_pred.mean().detach()
 
         if 'g' in preds:
             g_dist = preds['g_dist']
@@ -440,13 +436,13 @@ class DynamicsModel(nn.Module):
                 g_dist._validate_args = False
                 g_loss = -coef * g_dist.log_prob(target_g).mean()
                 losses.append(g_loss)
-                metrics['discount_loss'] = g_loss.detach()
-                metrics['discount_mae'] = torch.abs(target_g - g_pred.detach()).mean()
-            metrics['discount'] = g_pred.detach().mean()
+                metrics_d['discount_loss'] = g_loss.detach()
+                metrics_d['discount_mae'] = torch.abs(target_g - g_pred.detach()).mean()
+            metrics_d['discount'] = g_pred.detach().mean()
 
         if len(losses) == 0:
             loss = torch.zeros(1, device=z.device, requires_grad=False)
         else:
             loss = sum(losses)
-            metrics['dyn_loss'] = loss.detach()
-        return loss, metrics
+            metrics_d['dyn_loss'] = loss.detach()
+        return loss, metrics_d

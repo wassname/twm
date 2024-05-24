@@ -159,9 +159,10 @@ def create_craftax_env(game, noop_max=30, frame_skip=4, frame_stack=4, frame_siz
     game = "Craftax-Symbolic-v1"
     
     env = make_craftax_env_from_name(game, auto_reset=True)
-    env = GymnaxToGymWrapper(env, env.default_params, seed=seed)
+    env = GymnaxToGymWrapper(env, env.default_params, seed=seed) 
     env = CraftaxRenderWrapper(env, render_method=None)
     env = CraftaxCompatWrapper(env)
+    env = gym.wrappers.FrameStack(env, frame_stack)
     
     # env = make_craftax_env_from_name(game, auto_reset=True)
     # env = Gymax2GymWrapper(env, render_method=None)

@@ -306,7 +306,7 @@ class Trainer:
 
             o, a, r, terminated, truncated = [x[:, :-1] for x in (o, a, r, terminated, truncated)]
 
-        metrics = metrics_i  # only use last metrics
+        metrics_d = metrics_i  # only use last metrics
 
         # train actor-critic
         create_start = lambda x, size: utils.windows(x, size).flatten(0, 1)
@@ -330,9 +330,9 @@ class Trainer:
         if config['wm_discount_threshold'] == 0:
             d = None  # save some computation, since all dones are False in this case
         ac_metrics = ac.optimize(z, h, a, r, g, d, weights)
-        metrics.update_metrics(metrics, ac_metrics, prefix='ac/')
+        metrics.update_metrics(metrics_d, ac_metrics, prefix='ac/')
 
-        return metrics
+        return metrics_d
 
     @torch.no_grad()
     def _evaluate(self, is_final):
@@ -344,13 +344,15 @@ class Trainer:
         ac = agent.ac
         replay_buffer = self.replay_buffer
 
-        metrics = {}
-        metrics['buffer/visits'] = replay_buffer.visit_histogram()
-        metrics['buffer/sample_probs'] = replay_buffer.sample_probs_histogram()
-        recon_img, imagine_img = self._create_eval_images(is_final)
-        metrics['eval/recons'] = wandb.Image(recon_img)
-        if imagine_img is not None:
-            metrics['eval/imagine'] = wandb.Image(imagine_img)
+        metrics_d = {}
+        metrics_d['buffer/visits'] = replay_buffer.visit_histogram()
+        metrics_d['buffer/sample_probs'] = replay_buffer.sample_probs_histogram()
+
+        # FIXME: need to convert craftax state into a pixel image which requires a lot of new code
+        # recon_img, imagine_img = self._create_eval_images(is_final)
+        # metrics_d['eval/recons'] = wandb.Image(recon_img)
+        # if imagine_img is not None:
+        #     metrics_d['eval/imagine'] = wandb.Image(imagine_img)
 
         # similar to evaluation proposed in https://arxiv.org/pdf/2007.05929.pdf (SPR) section 4.1
         num_episodes = config['final_eval_episodes'] if is_final else config['eval_episodes']
@@ -419,29 +421,31 @@ class Trainer:
             'score_max': np.max(scores),
             'hns': compute_atari_hns(config['game'], score_mean)
         }
-        metrics.update({f'eval/{key}': value for key, value in score_metrics.items()})
+        metrics_d.update({f'eval/{key}': value for key, value in score_metrics.items()})
         if is_final:
-            metrics.update({f'eval/final_{key}': value for key, value in score_metrics.items()})
+            metrics_d.update({f'eval/final_{key}': value for key, value in score_metrics.items()})
 
         end_time = time.time()
         eval_time = end_time - start_time
 
         self.total_eval_time += eval_time
-        metrics['eval/total_time'] = self.total_eval_time
+        metrics_d['eval/total_time'] = self.total_eval_time
 
         self.last_eval = replay_buffer.size
-        return metrics
+        return metrics_d
 
     @torch.no_grad()
     def _create_eval_images(self, is_final=False):
         config = self.config
         agent = self.agent
         replay_buffer = self.replay_buffer
+        device = next(agent.parameters()).device
         obs_model = agent.wm.obs_model.eval()
 
         # recon_img
         idx = utils.random_choice(replay_buffer.size, 10, device=replay_buffer.device).unsqueeze(1)
-        o = replay_buffer.get_obs(idx)
+        o = replay_buffer.get_obs(idx, device=device)
+
         z = obs_model.encode_sample(o, temperature=0)
         recons = obs_model.decode(z)
         # use last frame of frame stack
@@ -457,11 +461,11 @@ class Trainer:
 
         # imagine_img
         idx = idx[:5]
-        start_o = replay_buffer.get_obs(idx, prefix=1)  # 1 for context
-        start_a = replay_buffer.get_actions(idx, prefix=1)[:, :-1]
-        start_r = replay_buffer.get_rewards(idx, prefix=1)[:, :-1]
-        start_terminated = replay_buffer.get_terminated(idx, prefix=1)[:, :-1]
-        start_truncated = replay_buffer.get_truncated(idx, prefix=1)[:, :-1]
+        start_o = replay_buffer.get_obs(idx, prefix=1, device=device)  # 1 for context
+        start_a = replay_buffer.get_actions(idx, prefix=1, device=device)[:, :-1]
+        start_r = replay_buffer.get_rewards(idx, prefix=1, device=device)[:, :-1]
+        start_terminated = replay_buffer.get_terminated(idx, prefix=1, device=device)[:, :-1]
+        start_truncated = replay_buffer.get_truncated(idx, prefix=1, device=device)[:, :-1]
         start_z = obs_model.encode_sample(start_o, temperature=0)
 
         horizon = 100 if is_final else config['wm_sequence_length']
