@@ -13,7 +13,7 @@ from twm.agent import Agent, Dreamer
 from twm.replay_buffer import ReplayBuffer
 from twm import utils, metrics
 from twm.envs.atari import preprocess_atari_obs, create_atari_env, create_vector_env, compute_atari_hns, NoAutoReset
-from twm.envs.craftax import create_craftax_env
+from twm.envs.craftax import create_craftax_env, craftax_symobs_to_img
 
 
 logger.remove()
@@ -348,11 +348,10 @@ class Trainer:
         metrics_d['buffer/visits'] = replay_buffer.visit_histogram()
         metrics_d['buffer/sample_probs'] = replay_buffer.sample_probs_histogram()
 
-        # FIXME: need to convert craftax state into a pixel image which requires a lot of new code
-        # recon_img, imagine_img = self._create_eval_images(is_final)
-        # metrics_d['eval/recons'] = wandb.Image(recon_img)
-        # if imagine_img is not None:
-        #     metrics_d['eval/imagine'] = wandb.Image(imagine_img)
+        recon_img, imagine_img = self._create_eval_images(is_final)
+        metrics_d['eval/recons'] = wandb.Image(recon_img)
+        if imagine_img is not None:
+            metrics_d['eval/imagine'] = wandb.Image(imagine_img)
 
         # similar to evaluation proposed in https://arxiv.org/pdf/2007.05929.pdf (SPR) section 4.1
         num_episodes = config['final_eval_episodes'] if is_final else config['eval_episodes']
@@ -451,6 +450,11 @@ class Trainer:
         # use last frame of frame stack
         o = o[:, :, -1:]
         recons = recons[:, :, -1:]
+
+        # for craftax convert state to image
+        o = craftax_symobs_to_img(o, self.env.env_state)
+        recons = craftax_symobs_to_img(recons, self.env.env_state)
+
         if config['env_grayscale']:
             recon_img = [o.unsqueeze(-3), recons.unsqueeze(-3)]  # unsqueeze channel
         else:
