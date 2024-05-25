@@ -21,7 +21,7 @@ def main(args=None):
         parser.add_argument('--config', type=str, default='default')
         parser.add_argument('--seed', type=int, default=42)
         parser.add_argument('--device', type=str, default='cuda')
-        parser.add_argument('--buffer_device', type=str, default=None)
+        parser.add_argument('--buffer_device', type=str, default='cpu')
         parser.add_argument('--cpu_p', type=float, default=0.5)
         parser.add_argument('--wandb', type=str, default='disabled')
         parser.add_argument('--project', type=str, default=None)
