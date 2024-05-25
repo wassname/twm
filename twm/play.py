@@ -7,7 +7,7 @@ import torch
 
 from twm.agent import Agent, Dreamer
 from twm import utils, nets
-from twm.envs.atari import preprocess_atari_obs
+# from twm.envs.atari import preprocess_atari_obs
 
 
 class DreamEnv(gym.Env):

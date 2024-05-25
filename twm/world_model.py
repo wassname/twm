@@ -218,6 +218,7 @@ class ObservationModel(nn.Module):
             recons = recons.unflatten(1, (config['env_frame_stack'], 3))
             recons = recons.permute(0, 1, 3, 4, 2)
         recons = recons.unflatten(0, shape)
+    
         return recons
 
     def compute_decoder_loss(self, recons: Obs, o: Obs):
@@ -229,10 +230,9 @@ class ObservationModel(nn.Module):
         recon_mean = recons.flatten(0, 1).permute(0, 2, 1)
         coef = config['obs_decoder_coef']
         if coef != 0:
-            if config['env_grayscale']:
-                o = o.flatten(0, 1).permute(0, 2, 1)
-            else:
-                o = o.flatten(0, 1).permute(0, 2, 1).flatten(-2, -1)
+            o = o.flatten(0, 1).permute(0, 2, 1)
+            # else:
+            #     o = o.flatten(0, 1).permute(0, 2, 1).flatten(-2, -1)
             recon_dist = D.Independent(D.Normal(recon_mean, torch.ones_like(recon_mean)), 3)
             loss = -coef * recon_dist.log_prob(o).mean()
             metrics_d['dec_loss'] = loss.detach()

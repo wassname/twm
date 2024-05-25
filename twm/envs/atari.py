@@ -27,6 +27,7 @@ def create_reward_transform(transform_type):
 
 
 def preprocess_atari_obs(obs, device=None):
+    # FIXME
     if isinstance(obs, gym.wrappers.LazyFrames):
         obs = np.array(obs)
     return torch.as_tensor(obs, device=device).float() / 255.

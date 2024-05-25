@@ -12,8 +12,8 @@ from tqdm.auto import tqdm
 from twm.agent import Agent, Dreamer
 from twm.replay_buffer import ReplayBuffer
 from twm import utils, metrics
-from twm.envs.atari import preprocess_atari_obs, create_atari_env, create_vector_env, compute_atari_hns, NoAutoReset
-from twm.envs.craftax import create_craftax_env, craftax_symobs_to_img
+# from twm.envs.atari import preprocess_atari_obs, create_atari_env, create_vector_env, compute_atari_hns, NoAutoReset
+from twm.envs.craftax import create_craftax_env, craftax_symobs_to_img, create_vector_env
 
 
 logger.remove()
@@ -267,8 +267,8 @@ class Trainer:
         budget = config['pretrain_budget'] * (1 - config['pretrain_obs_p'] + config['pretrain_dyn_p'])
         while budget > 0:
             with tqdm(total=budget, mininterval=30) as pbar:
-                for idx in tqdm(replay_buffer.generate_uniform_indices(
-                        config['ac_batch_size'], config['ac_horizon'], extra=2), total=budget, mininterval=30):  # 2 for context + next
+                for idx in replay_buffer.generate_uniform_indices(
+                        config['ac_batch_size'], config['ac_horizon'], extra=2):  # 2 for context + next
                     z = obs_model.sample_z(z_dist, idx=idx.flatten())
                     z = z.squeeze(1).unflatten(0, idx.shape)
                     idx = idx[:, :-2]
@@ -361,6 +361,8 @@ class Trainer:
         num_episodes = config['final_eval_episodes'] if is_final else config['eval_episodes']
         num_envs = max(min(num_episodes, int(multiprocessing.cpu_count() * config['cpu_p'])), 1)
         env_fn = lambda: Trainer._create_env_from_config(config, eval=True)
+
+        # FIXME: this multiproc wont work with craftax jax
         eval_env = create_vector_env(num_envs, env_fn)
 
         seed = ((config['seed'] + 13) * 7919 + 13) if config['seed'] is not None else None
@@ -451,19 +453,21 @@ class Trainer:
 
         z = obs_model.encode_sample(o, temperature=0)
         recons = obs_model.decode(z)
-        # use last frame of frame stack
-        o = o[:, :, -1:]
-        recons = recons[:, :, -1:]
+        # use last frame of frame stack [b=10, 1?, framestack=4, odim=8268[
+        o = o[:, :, -1]
+        recons = recons[:, :, -1]
 
         # for craftax convert state to image
-        o = craftax_symobs_to_img(o, self.env.env_state)
-        recons = craftax_symobs_to_img(recons, self.env.env_state)
+        o = torch.from_numpy(np.array([craftax_symobs_to_img(oo.squeeze(0), self.env.env_state) for oo in o]))
+        recons = torch.from_numpy(np.array([craftax_symobs_to_img(rr.squeeze(0), self.env.env_state) for rr in recons]))
+        # [10, 130, 110, 3]
 
-        if config['env_grayscale']:
-            recon_img = [o.unsqueeze(-3), recons.unsqueeze(-3)]  # unsqueeze channel
-        else:
-            recon_img = [o.permute(0, 1, 2, 5, 3, 4), recons.permute(0, 1, 2, 5, 3, 4)]
-        recon_img = torch.cat(recon_img, dim=0).squeeze(1).transpose(0, 1).flatten(0, 1)
+        # if config['env_grayscale']:
+        #     recon_img = [o.unsqueeze(-3), recons.unsqueeze(-3)]  # unsqueeze channel
+        # else:
+        # [B, ?, 4, 84, 84]
+        recon_img = [o.permute(0, 3, 1, 2), recons.permute(0, 3, 1, 2)]
+        recon_img = torch.cat(recon_img, dim=0) * 1.0 # .transpose(0, 1).flatten(0, 1) * 1.0
         recon_img = torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)
         recon_img = utils.to_image(recon_img)
 
@@ -489,12 +493,12 @@ class Trainer:
         a, r, g, weights = [x.cpu().numpy() for x in (a, r, g, weights)]
 
         imagine_img = o
-        if config['env_grayscale']:
-            imagine_img = imagine_img.unsqueeze(3)
-        else:
-            imagine_img = imagine_img.permute(0, 1, 2, 5, 3, 4)
-        imagine_img = imagine_img.unsqueeze(1)
-        imagine_img = imagine_img.transpose(2, 3).flatten(0, 3)
+        imagine_img = torch.from_numpy(np.array([craftax_symobs_to_img(oo.squeeze(0), self.env.env_state) for oo in imagine_img]))
+        # if config['env_grayscale']:
+        #     imagine_img = imagine_img.unsqueeze(3)
+        # else:
+        imagine_img = imagine_img.permute(0, 3, 1, 2)
+        # imagine_img = imagine_img.transpose(2, 3).flatten(0, 3)
         pad = 2
         extra_pad = 38
         imagine_img = utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))

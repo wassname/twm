@@ -3,7 +3,7 @@ from torch import nn
 
 from twm.actor_critic import ActorCritic
 from twm.world_model import WorldModel
-import twm.utils
+from twm import utils
 from jaxtyping import Float
 
 class Agent(nn.Module):

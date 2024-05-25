@@ -11,6 +11,7 @@ from craftax.craftax_env import make_craftax_env_from_name
 from craftax.craftax.play_craftax import CraftaxRenderer
 from craftax.craftax.renderer import render_craftax_pixels, render_craftax_text, inverse_render_craftax_symbolic
 from craftax.craftax.constants import Action
+from craftax.craftax.craftax_state import EnvState
 from gymnasium.wrappers import FrameStack, TimeLimit
 from gymnax.wrappers import GymnaxToGymWrapper
 import torch
@@ -368,8 +369,12 @@ class LogWrapper(GymnaxWrapper):
         return obs, state, reward, done, info
         
 
-def craftax_symobs_to_img(obs, real_env_state):
+def craftax_symobs_to_img(obs: torch.Tensor, real_env_state: EnvState):
     """convert symbolic obs to image"""
-    env_state = inverse_render_craftax_symbolic(obs.numpy(), env_state=real_env_state, )
+    env_state = inverse_render_craftax_symbolic(obs.cpu().numpy(), env_state=real_env_state, )
     im = render_craftax_pixels(env_state, block_pixel_size=10).astype(np.uint8)
     return im
+
+
+def create_vector_env(num_envs, env):
+    return BatchEnvWrapper(env, num_envs=num_envs)

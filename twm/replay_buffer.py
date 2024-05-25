@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.distributions as D
 from twm.custom_types import Obs
 from twm import utils, metrics
-from twm.envs.atari import create_reward_transform, preprocess_atari_obs
+# from twm.envs.atari import create_reward_transform, preprocess_atari_obs
 
 
 class ReplayBuffer:
@@ -39,7 +39,7 @@ class ReplayBuffer:
         self.score = 0
         self.episode_lengths = []
         self.scores = []
-        self.reward_transform = create_reward_transform(config['env_reward_transform'])
+        self.reward_transform = lambda r:r
         self.metrics_num_episodes = 0
 
     def sample_random_action(self):
@@ -104,8 +104,7 @@ class ReplayBuffer:
         return x
 
     def get_obs(self, idx, device=None, prefix=0, return_next=False) -> Obs:
-        obs = self._get(self.obs, idx, device, prefix, return_next=return_next, allow_last=True)
-        return preprocess_atari_obs(obs, device)
+        return self._get(self.obs, idx, device, prefix, return_next=return_next, allow_last=True)
 
     def get_actions(self, idx, device=None, prefix=0):
         return self._get(self.actions, idx, device, prefix, repeat_fill_value=0)  # noop
