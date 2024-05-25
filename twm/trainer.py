@@ -14,6 +14,7 @@ from twm.replay_buffer import ReplayBuffer
 from twm import utils, metrics
 # from twm.envs.atari import preprocess_atari_obs, create_atari_env, create_vector_env, compute_atari_hns, NoAutoReset
 from twm.envs.craftax import create_craftax_env, craftax_symobs_to_img, create_vector_env
+from twm.envs.atari import NoAutoReset
 
 
 logger.remove()
@@ -68,7 +69,7 @@ class Trainer:
         #     config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'])
         env = create_craftax_env(
             config['game'], noop_max, config['env_frame_skip'], config['env_frame_stack'],
-            config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'])
+            config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'], eval=eval)
         if eval:
             # FIXME: make it work for crafter
             env = NoAutoReset(env)  # must use options={'force': True} to really reset
@@ -360,6 +361,7 @@ class Trainer:
         # similar to evaluation proposed in https://arxiv.org/pdf/2007.05929.pdf (SPR) section 4.1
         num_episodes = config['final_eval_episodes'] if is_final else config['eval_episodes']
         num_envs = max(min(num_episodes, int(multiprocessing.cpu_count() * config['cpu_p'])), 1)
+        logger.debug(f'num_envs: {num_envs}')
         env_fn = lambda: Trainer._create_env_from_config(config, eval=True)
 
         # FIXME: this multiproc wont work with craftax jax
@@ -367,7 +369,7 @@ class Trainer:
 
         seed = ((config['seed'] + 13) * 7919 + 13) if config['seed'] is not None else None
         start_obs, _ = eval_env.reset(seed=seed)
-        start_obs = preprocess_atari_obs(start_obs, device).unsqueeze(1)
+        # start_obs = preprocess_atari_obs(start_obs, device).unsqueeze(1)
 
         dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
         dreamer.observe_reset_single(start_obs)
@@ -391,7 +393,7 @@ class Trainer:
                     elif terminated[i] and lives[i] == 0:
                         finished[i] = True
 
-            o = preprocess_atari_obs(o, device).unsqueeze(1)
+            # o = preprocess_atari_obs(o, device).unsqueeze(1)
             r = torch.as_tensor(r, dtype=torch.float, device=device).unsqueeze(1)
             terminated = torch.as_tensor(terminated, device=device).unsqueeze(1)
             truncated = torch.as_tensor(truncated, device=device).unsqueeze(1)
@@ -410,7 +412,7 @@ class Trainer:
                 if seed is not None:
                     seed = seed * 3 + 13 + num_envs
                 start_o, _ = eval_env.reset(seed=seed, options={'force': True})
-                start_o = preprocess_atari_obs(start_o, device).unsqueeze(1)
+                # start_o = preprocess_atari_obs(start_o, device).unsqueeze(1)
                 dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
                 dreamer.observe_reset_single(start_o)
         eval_env.close(terminate=True)
@@ -424,7 +426,7 @@ class Trainer:
             'score_median': np.median(scores),
             'score_min': np.min(scores),
             'score_max': np.max(scores),
-            'hns': compute_atari_hns(config['game'], score_mean)
+            # 'hns': compute_atari_hns(config['game'], score_mean)
         }
         metrics_d.update({f'eval/{key}': value for key, value in score_metrics.items()})
         if is_final:
@@ -458,16 +460,11 @@ class Trainer:
         recons = recons[:, :, -1]
 
         # for craftax convert state to image
-        o = torch.from_numpy(np.array([craftax_symobs_to_img(oo.squeeze(0), self.env.env_state) for oo in o]))
-        recons = torch.from_numpy(np.array([craftax_symobs_to_img(rr.squeeze(0), self.env.env_state) for rr in recons]))
-        # [10, 130, 110, 3]
-
-        # if config['env_grayscale']:
-        #     recon_img = [o.unsqueeze(-3), recons.unsqueeze(-3)]  # unsqueeze channel
-        # else:
-        # [B, ?, 4, 84, 84]
+        o = craftax_symobs_to_img(o.squeeze(1), self.env.env_state)
+        recons = craftax_symobs_to_img(recons.squeeze(1), self.env.env_state)
+        # render observations and reconstructions are two columns
         recon_img = [o.permute(0, 3, 1, 2), recons.permute(0, 3, 1, 2)]
-        recon_img = torch.cat(recon_img, dim=0) * 1.0 # .transpose(0, 1).flatten(0, 1) * 1.0
+        recon_img = torch.cat(recon_img, dim=0) * 1.0
         recon_img = torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)
         recon_img = utils.to_image(recon_img)
 
@@ -492,15 +489,13 @@ class Trainer:
         o = o[:, :-1, -1:]  # remove last time step and use last frame of frame stack
         a, r, g, weights = [x.cpu().numpy() for x in (a, r, g, weights)]
 
-        imagine_img = o
-        imagine_img = torch.from_numpy(np.array([craftax_symobs_to_img(oo.squeeze(0), self.env.env_state) for oo in imagine_img]))
-        # if config['env_grayscale']:
-        #     imagine_img = imagine_img.unsqueeze(3)
-        # else:
-        imagine_img = imagine_img.permute(0, 3, 1, 2)
-        # imagine_img = imagine_img.transpose(2, 3).flatten(0, 3)
+        # FIXME: o [b=5, seq=18, frames=4, dim=8269], why 18? a = [b=5, seq=17]
+        imagine_img = craftax_symobs_to_img(o, self.env.env_state).squeeze(2).reshape(-1, 130, 110, 3)
+        # [5, 17, 130, 110, 3]
+        imagine_img = imagine_img.permute(0, 3, 1, 2) # channels first
         pad = 2
         extra_pad = 38
+        # make an image where the rows are the rollout, cols are batch
         imagine_img = utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))
         imagine_img = utils.to_image(imagine_img[:, extra_pad:])
 

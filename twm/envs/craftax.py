@@ -15,92 +15,24 @@ from craftax.craftax.craftax_state import EnvState
 from gymnasium.wrappers import FrameStack, TimeLimit
 from gymnax.wrappers import GymnaxToGymWrapper
 import torch
-
-# class Gymax2GymWrapper(gym.Wrapper):
-#     """
-#     Wrap Gymax (jas gym) to Gym (original gym)
-#     The main difference is that Gymax needs a rng key for every step and reset
-#     """
-#     def __init__(self, env, render_method:Optional[str]=None) -> None:
-#         gym.Wrapper.__init__(self, env)
-#         self.env_params = env.default_params
-#         rng = jax.random.PRNGKey(0)
-#         rng, _rng = jax.random.split(rng)
-#         self.rngs = jax.random.split(_rng, 3)
-#         self.render_method = render_method
-#         if render_method == 'play':
-#             self.renderer = CraftaxRenderer(self.env, self.env_params, pixel_render_size=1)
-#         self.renderer = None
-            
-#     # # provide proxy access to regular attributes of wrapped object
-#     # def __getattr__(self, name):
-#     #     return getattr(self._env, name)
-
-#     def step(self, action):
-#         obs, state, reward, done, info = self.env.step(self.rngs[2], self.env_state, action, self.env_params)
-#         self.env_state = state
-#         if self.renderer is not None:
-#             self.renderer.update()
-#         return obs, reward, done, info
-
-#     @property
-#     def action_space(self):
-#         # it returns a jax action space where the sample need rng
-#         action_space =  self.env.action_space(self.env_params)
-#         def sample(*args, **kwargs):
-#             return action_space.sample(self.rngs[2])
-#         action_space.sample = sample
-#         return action_space
-#         # return self.env.action_space.sample()
-    
-#     @property
-#     def observation_space(self):
-#         return self.env.observation_space(self.env_params)
-    
-#     def reset(self, seed=None, options={}):
-#         if seed is not None:
-#             self.rngs = jax.random.split(jax.random.PRNGKey(seed), 3)
-#         obs, state = self.env.reset(self.rngs[0], self.env_params)
-#         self.env_state = state
-#         if self.renderer is not None:
-#             self.renderer.update()
-#         return obs, state
-    
-#     def render(self, mode='rgb_array'):
-#         if self.renderer is not None:
-#             return self.renderer.render(self.env_state)
-#         if self.render_method is 'text':            
-#             return render_craftax_text(self.env_state)
-#         else:
-#             return render_craftax_pixels(self.env_state)
-        
-#     def get_action_meanings(self) -> Dict[int, str]:
-#         return {i:s for s,i in Action.__members__.items()}
-    
-#     def close(self):
-#         if self.renderer is not None:
-#             self.renderer.pygame.quit()
-#             self.renderer.close()
-
-        
-    # TODO other methods
-    # close()
-    # self.action_meanings = start_o_env.get_action_meanings()
-    # a = act(epsilon=0)
-    # .unwrapped
-    # keys_to_action = env.get_keys_to_action()
+from jaxtyping import Float
+from torch import Tensor
 
 
 def from_jax(t):
     return torch.as_tensor(t.tolist())
 
 class CraftaxCompatWrapper(gym.Wrapper):
+    """Misc compat"""
     
     def step(self, *args, **kwargs):
         next_obs, reward, terminated, truncated, info =  self.env.step(*args, **kwargs)
         return from_jax(next_obs), from_jax(reward), from_jax(terminated), from_jax(truncated), info
     
     def reset(self, *args, **kwargs):
+        # if 'seed' in kwargs:
+        #     kwargs['rng'] = jax.random.PRNGKey(int(kwargs['seed']))
+        #     del kwargs['seed']
         obs, state = self.env.reset(*args, **kwargs)
         return from_jax(obs), state
     
@@ -150,7 +82,7 @@ class CraftaxRenderWrapper(gym.Wrapper):
 
         
 def create_craftax_env(game, noop_max=30, frame_skip=4, frame_stack=4, frame_size=84,
-                     episodic_lives=True, grayscale=True, time_limit=27000, seed=42):
+                     episodic_lives=True, grayscale=True, time_limit=27000, seed=42, eval=False, num_envs=1):
     """
     Craftax with
     - frame_stack 4?
@@ -158,9 +90,20 @@ def create_craftax_env(game, noop_max=30, frame_skip=4, frame_stack=4, frame_siz
     
     """
     game = "Craftax-Symbolic-v1"
-    
+    # see https://github.dev/MichaelTMatthews/Craftax_Baselines/blob/main/ppo_rnn.py
+    # env = make_craftax_env_from_name(game, auto_reset=eval)
     env = make_craftax_env_from_name(game, auto_reset=True)
     env = GymnaxToGymWrapper(env, env.default_params, seed=seed) 
+    # env = LogWrapper(env)
+    # FIXME: sort this out
+    # if not eval:
+    #     env = OptimisticResetVecEnvWrapper(
+    #         env,
+    #         num_envs=num_envs,
+    #         reset_ratio=min(not eval, True),
+    #     )
+    # else:
+    #     env = BatchEnvWrapper(env, num_envs=num_envs)
     env = CraftaxRenderWrapper(env, render_method=None)
     env = CraftaxCompatWrapper(env)
     env = gym.wrappers.FrameStack(env, frame_stack)
@@ -169,7 +112,6 @@ def create_craftax_env(game, noop_max=30, frame_skip=4, frame_stack=4, frame_siz
     # env = Gymax2GymWrapper(env, render_method=None)
     
     env.unwrapped.spec = gym.spec(game) # required for AtariPreprocessing
-    # env = gym.wrappers.FrameStack(env, frame_stack) # FIXME doesn't work when high and low haven o 
     env = gym.wrappers.TimeLimit(env, max_episode_steps=time_limit)
     return env
 
@@ -334,8 +276,8 @@ class LogWrapper(GymnaxWrapper):
         super().__init__(env)
 
     @partial(jax.jit, static_argnums=(0, 2))
-    def reset(self, key: chex.PRNGKey, params=None):
-        obs, env_state = self._env.reset(key, params)
+    def reset(self, rng: chex.PRNGKey, params=None):
+        obs, env_state = self._env.reset(rng, params)
         state = LogEnvState(env_state, 0.0, 0, 0.0, 0, 0)
         return obs, state
 
@@ -369,12 +311,19 @@ class LogWrapper(GymnaxWrapper):
         return obs, state, reward, done, info
         
 
-def craftax_symobs_to_img(obs: torch.Tensor, real_env_state: EnvState):
+def craftax_symobs_to_img(obs: Float[Tensor, 'batch ... 8268'], real_env_state: EnvState) -> Float[Tensor, 'batch ... h w c']:
     """convert symbolic obs to image"""
-    env_state = inverse_render_craftax_symbolic(obs.cpu().numpy(), env_state=real_env_state, )
-    im = render_craftax_pixels(env_state, block_pixel_size=10).astype(np.uint8)
+    assert obs.shape[-1]==8268
+    obs2 = obs.reshape(-1, 8268).cpu().numpy()
+    env_state = [inverse_render_craftax_symbolic(oo, env_state=real_env_state) for oo in obs2]
+    im = [render_craftax_pixels(oo, block_pixel_size=10).astype(np.uint8) for oo in env_state]
+    im =  torch.from_numpy(np.array(im))
+
+    # return to original shape
+    im = im.reshape(*obs.shape[:-1], *im.shape[-3:])
     return im
 
 
 def create_vector_env(num_envs, env):
+    # TODO: wait isn't this meant to be used before gymax2gymnasium?
     return BatchEnvWrapper(env, num_envs=num_envs)
