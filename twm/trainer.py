@@ -248,42 +248,46 @@ class Trainer:
         logger.info("pretrain dynamics model")
         budget = config['pretrain_budget'] * config['pretrain_dyn_p']
         while budget > 0:
-            for idx in tqdm(replay_buffer.generate_uniform_indices(
-                    config['wm_batch_size'], config['wm_sequence_length'], extra=2)):  # 2 for context + next
-                z, logits = obs_model.sample_z(z_dist, idx=idx.flatten(), return_logits=True)
-                z, logits = [x.squeeze(1).unflatten(0, idx.shape) for x in (z, logits)]
-                z = z[:, :-1]
-                target_logits = logits[:, 2:]
-                idx = idx[:, :-2]
-                _, a, r, terminated, truncated, _ = replay_buffer.get_data(idx, device=device, prefix=1)
-                _ = wm.optimize_pretrain_dyn(z, a, r, terminated, truncated, target_logits)
-                budget -= idx.numel()
-                if budget <= 0:
-                    break
+            with tqdm(total=budget, mininterval=30) as pbar:
+                for idx in replay_buffer.generate_uniform_indices(
+                        config['wm_batch_size'], config['wm_sequence_length'], extra=2):  # 2 for context + next
+                    z, logits = obs_model.sample_z(z_dist, idx=idx.flatten(), return_logits=True)
+                    z, logits = [x.squeeze(1).unflatten(0, idx.shape) for x in (z, logits)]
+                    z = z[:, :-1]
+                    target_logits = logits[:, 2:]
+                    idx = idx[:, :-2]
+                    _, a, r, terminated, truncated, _ = replay_buffer.get_data(idx, device=device, prefix=1)
+                    _ = wm.optimize_pretrain_dyn(z, a, r, terminated, truncated, target_logits)
+                    budget -= idx.numel()
+                    pbar.update(idx.numel())
+                    if budget <= 0:
+                        break
 
         logger.info("pretrain ac")
         budget = config['pretrain_budget'] * (1 - config['pretrain_obs_p'] + config['pretrain_dyn_p'])
         while budget > 0:
-            for idx in tqdm(replay_buffer.generate_uniform_indices(
-                    config['ac_batch_size'], config['ac_horizon'], extra=2)):  # 2 for context + next
-                z = obs_model.sample_z(z_dist, idx=idx.flatten())
-                z = z.squeeze(1).unflatten(0, idx.shape)
-                idx = idx[:, :-2]
-                _, a, r, terminated, truncated, _ = replay_buffer.get_data(idx, device=device, prefix=1)
-                d = torch.logical_or(terminated, truncated)
-                if config['ac_input_h']:
-                    g = wm.to_discounts(terminated)
-                    tgt_length = config['ac_horizon'] + 1
-                    with torch.no_grad():
-                        _, h, _ = wm.dyn_model.eval().predict(z[:, :-1], a, r, g, d[:, :-1], tgt_length)
-                else:
-                    h = None
-                g = wm.to_discounts(d)
-                z, r, g, d = [x[:, 1:] for x in (z, r, g, d)]
-                _ = ac.optimize_pretrain(z, h, r, g, d)
-                budget -= idx.numel()
-                if budget <= 0:
-                    break
+            with tqdm(total=budget, mininterval=30) as pbar:
+                for idx in tqdm(replay_buffer.generate_uniform_indices(
+                        config['ac_batch_size'], config['ac_horizon'], extra=2), total=budget, mininterval=30):  # 2 for context + next
+                    z = obs_model.sample_z(z_dist, idx=idx.flatten())
+                    z = z.squeeze(1).unflatten(0, idx.shape)
+                    idx = idx[:, :-2]
+                    _, a, r, terminated, truncated, _ = replay_buffer.get_data(idx, device=device, prefix=1)
+                    d = torch.logical_or(terminated, truncated)
+                    if config['ac_input_h']:
+                        g = wm.to_discounts(terminated)
+                        tgt_length = config['ac_horizon'] + 1
+                        with torch.no_grad():
+                            _, h, _ = wm.dyn_model.eval().predict(z[:, :-1], a, r, g, d[:, :-1], tgt_length)
+                    else:
+                        h = None
+                    g = wm.to_discounts(d)
+                    z, r, g, d = [x[:, 1:] for x in (z, r, g, d)]
+                    _ = ac.optimize_pretrain(z, h, r, g, d)
+                    budget -= idx.numel()
+                    pbar.update(idx.numel())
+                    if budget <= 0:
+                        break
         ac.sync_target()
 
     def _train_step(self):
