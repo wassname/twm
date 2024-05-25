@@ -14,8 +14,8 @@
             "autoReload": {"enable": true,},
             "env": {"WANDB_MODE":"disabled","WANDB_SILENT":"true",},
             "args": [
-                // "--game=Craftax-Symbolic-AutoReset-v1",
-                "--game=Breakout",
+                "--game=Craftax-Symbolic-AutoReset-v1",
+                // "--game=Breakout",
                 "--config=test",
                 "--buffer_device=cpu",
             ]
