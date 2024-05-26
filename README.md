@@ -1,6 +1,20 @@
 A fork to try
-- pretrained LLM's vs plain
-- craftax
+- [ ] pretrained LLM's vs plain
+- [x] Use craftax environment
+
+Imagine:
+![](doc/img/imagine_24_54a2878d2207ca4311e5.png)
+
+Reconstruction:
+![](doc/img/recons_24_72a0546d4a140898b44d.png)
+
+
+See also
+- https://github.com/MichaelTMatthews/Craftax
+- https://github.com/MichaelTMatthews/Craftax_Baselines
+- https://github.com/RobertTLange/gymnax
+- https://github.com/RobertTLange/gymnax-blines
+- https://github.com/Farama-Foundation/Gymnasium
 
 Original repository:
 # Transformer-based World Models Are Happy With 100k Interactions (ICLR 2023)
