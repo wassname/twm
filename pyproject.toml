@@ -6,7 +6,7 @@ authors = ["wassname <git@wassname.org>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.13"
+python = ">=3.11,<4.0"
 torch = {version = "^2.1.0+cu121", source = "pytorch"}
 # pandas = "^2.2.2"
 # matplotlib = "^3.8.0"
