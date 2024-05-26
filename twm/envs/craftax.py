@@ -1,5 +1,5 @@
 
-import gym
+# import gym
 import jax
 import jax.numpy as jnp
 import chex
@@ -12,21 +12,56 @@ from craftax.craftax.play_craftax import CraftaxRenderer
 from craftax.craftax.renderer import render_craftax_pixels, render_craftax_text, inverse_render_craftax_symbolic
 from craftax.craftax.constants import Action
 from craftax.craftax.craftax_state import EnvState
-from gymnasium.wrappers import FrameStack, TimeLimit
-from gymnax.wrappers import GymnaxToGymWrapper
+import gymnasium
+from gymnasium.wrappers import FrameStackObservation, TimeLimit, JaxToTorch
+import gymnasium.spaces as gym_spaces
+from twm.envs.gymnax2gymnasium import GymnaxToGymWrapper, GymnaxToVectorGymWrapper
 import torch
-from jaxtyping import Float
+from jaxtyping import Float, Int, Bool
 from torch import Tensor
+from twm.custom_types import Obs, TrcBool, TrcFloat32, TrcInt64
+
+import gymnasium.spaces as gym_spaces
+from gymnasium.wrappers import TransformObservation
+
+def permute_env(env, prm = [1, 0, 2]):
+    os = env.observation_space
+    oshape = os.shape    
+    new_os =  gym_spaces.Box(
+        low=np.transpose(os.low, prm), 
+        high=np.transpose(os.high, prm), 
+        shape=[oshape[i] for i in prm], 
+        dtype=os.dtype
+        )
+    env = TransformObservation(env, lambda x: jnp.transpose(x, prm), obs_space=new_os)
+    return env
 
 
 def from_jax(t):
     return torch.as_tensor(t.tolist())
 
-class CraftaxCompatWrapper(gym.Wrapper):
-    """Misc compat"""
+
+
+# class PermuteObsWrapper(gym.ObservationWrapper):
+#     def __init__(self, env, permute_dims):
+#         super().__init__(env)
+
+#     def observation(self, obs):
+#         obs = obs.permute(*self.permute_dims)
+#         return obs
+
+class CraftaxCompatWrapper(gymnasium.core.Wrapper):
+    """
+    Misc compat
+    - from jax
+    """
+
+    def __init__(self, env) -> None:
+        super().__init__(env)
+        self._env = env.unwrapped._env
     
-    def step(self, *args, **kwargs):
-        next_obs, reward, terminated, truncated, info =  self.env.step(*args, **kwargs)
+    def step(self, action: int) -> Tuple[Float[Tensor, 'frames odim'], float, bool, bool, Dict]:
+        next_obs, reward, terminated, truncated, info =  self.env.step(action)
         return from_jax(next_obs), from_jax(reward), from_jax(terminated), from_jax(truncated), info
     
     def reset(self, *args, **kwargs):
@@ -37,10 +72,42 @@ class CraftaxCompatWrapper(gym.Wrapper):
         return from_jax(obs), state
     
     def get_action_meanings(self) -> Dict[int, str]:
-        return {i:s for s,i in Action.__members__.items()}
+        return {i.value:s for s,i in Action.__members__.items()}
+    
+    @property
+    def env_state(self):
+        return self.env.unwrapped.env_state
+    
+    # # provide proxy access to regular attributes of wrapped object
+    # def __getattr__(self, name):
+    #     print('gettattr', name)
+    #     try:
+    #         return getattr(self, name)
+    #     except AttributeError:
+    #         raise
+    #         pass
+    #     try:
+    #         return getattr(self.env, name)
+    #     except AttributeError:
+    #         pass
+    #     try:
+    #         return getattr(self._env, name)
+    #     except AttributeError:
+    #         pass
+    #     try:
+    #         return getattr(self.unwrapped, name)
+    #     except AttributeError:
+    #         pass
+    #     try:
+    #         return getattr(self.unwrapped._env, name)
+    #     except AttributeError:
+    #         pass
+    #     raise AttributeError(f"AttributeError: {name}")
+            
 
 
-class CraftaxRenderWrapper(gym.Wrapper):
+
+class CraftaxRenderWrapper(gymnasium.core.Wrapper):
     """
     Wrap Gymax (jas gym) to Gym (original gym)
     The main difference is that Gymax needs a rng key for every step and reset
@@ -81,8 +148,7 @@ class CraftaxRenderWrapper(gym.Wrapper):
         
 
         
-def create_craftax_env(game, noop_max=30, frame_skip=4, frame_stack=4, frame_size=84,
-                     episodic_lives=True, grayscale=True, time_limit=27000, seed=42, eval=False, num_envs=1):
+def create_craftax_env(game, frame_stack=4, time_limit=27000, seed=42, eval=False, num_envs=1):
     """
     Craftax with
     - frame_stack 4?
@@ -93,26 +159,28 @@ def create_craftax_env(game, noop_max=30, frame_skip=4, frame_stack=4, frame_siz
     # see https://github.dev/MichaelTMatthews/Craftax_Baselines/blob/main/ppo_rnn.py
     # env = make_craftax_env_from_name(game, auto_reset=eval)
     env = make_craftax_env_from_name(game, auto_reset=True)
-    env = GymnaxToGymWrapper(env, env.default_params, seed=seed) 
+    if num_envs > 1:
+        # FIXME: naive optimistic resets don't work well with multiple envs see OptimisticResetVecEnvWrapper
+        env = GymnaxToVectorGymWrapper(env, seed=seed, num_envs=num_envs) 
+        raise NotImplementedError("Only num_envs > 1 supported FIXME")
+    else:
+        env = GymnaxToGymWrapper(env, env.default_params, seed=seed) 
     # env = LogWrapper(env)
-    # FIXME: sort this out
-    # if not eval:
-    #     env = OptimisticResetVecEnvWrapper(
-    #         env,
-    #         num_envs=num_envs,
-    #         reset_ratio=min(not eval, True),
-    #     )
-    # else:
-    #     env = BatchEnvWrapper(env, num_envs=num_envs)
+
+    # env = JaxToTorch(env)
+
+    # We have to vectorise using jax earlier as there is not framestack wrapepr avaiable for jax
+    # but then the framestack dim is before the env dim [framestack, batch, obs_dim] so lets swap those
+    env = FrameStackObservation(env, frame_stack)
+    if num_envs > 1:
+        env = permute_env(env, [1, 0, 2])
+
+    # env.unwrapped.spec = gym.spec(game) # required for AtariPreprocessing
+    # FIXME: should this be here for eval?
+    env = TimeLimit(env, max_episode_steps=time_limit)
+
     env = CraftaxRenderWrapper(env, render_method=None)
     env = CraftaxCompatWrapper(env)
-    env = gym.wrappers.FrameStack(env, frame_stack)
-    
-    # env = make_craftax_env_from_name(game, auto_reset=True)
-    # env = Gymax2GymWrapper(env, render_method=None)
-    
-    env.unwrapped.spec = gym.spec(game) # required for AtariPreprocessing
-    env = gym.wrappers.TimeLimit(env, max_episode_steps=time_limit)
     return env
 
 """
@@ -321,9 +389,29 @@ def craftax_symobs_to_img(obs: Float[Tensor, 'batch ... 8268'], real_env_state: 
 
     # return to original shape
     im = im.reshape(*obs.shape[:-1], *im.shape[-3:])
+    # [batch, h=130, w=110, c=3]
     return im
 
 
 def create_vector_env(num_envs, env):
     # TODO: wait isn't this meant to be used before gymax2gymnasium?
     return BatchEnvWrapper(env, num_envs=num_envs)
+
+class NoAutoReset(gymnasium.Wrapper):
+
+    def __init__(self, env):
+        super().__init__(env)
+        self.final_observation = None
+        self.final_info = None
+
+    def reset(self, seed=None, options=None):
+        if self.final_observation is None or (options is not None and options.get('force', False)):
+            return self.env.reset(seed=seed, options=options)
+        return self.final_observation, self.final_info
+
+    def step(self, action):
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        if terminated or truncated:
+            self.final_observation = obs
+            self.final_info = info
+        return obs, reward, terminated, truncated, info

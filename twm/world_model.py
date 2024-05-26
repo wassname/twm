@@ -169,6 +169,8 @@ class ObservationModel(nn.Module):
     def encode(self, o: Obs) -> Z_dist:
         assert utils.check_no_grad(o)
         config = self.config
+        assert o.ndim == 4
+        # this assumes obs has a [b, tgt_len, frames, odim] shape
         shape = o.shape[:2]
         o = o.flatten(0, 1)
 

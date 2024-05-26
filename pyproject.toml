@@ -28,7 +28,7 @@ craftax = {path = "/media/wassname/SGIronWolf/projects5/2024/Craftax", develop =
 Pillow = "^9.0.0"
 # ale_py = "^0.7.0"
 protobuf = "^3.10.0"
-gymnasium = {version = "^0.29.1", extras = ["atari", "accept-rom-license", "other"]}
+gymnasium = {version = "^1.0.0a2", extras = ["other"]}
 jaxtyping = "^0.2.2"
 # typeguard = "^4.2.20"
 beartype = "^0.18.5"

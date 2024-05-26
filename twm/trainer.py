@@ -12,11 +12,9 @@ from tqdm.auto import tqdm
 from twm.agent import Agent, Dreamer
 from twm.replay_buffer import ReplayBuffer
 from twm import utils, metrics
-# from twm.envs.atari import preprocess_atari_obs, create_atari_env, create_vector_env, compute_atari_hns, NoAutoReset
-from twm.envs.craftax import create_craftax_env, craftax_symobs_to_img, create_vector_env
-from twm.envs.atari import NoAutoReset
+from twm.envs.craftax import create_craftax_env, craftax_symobs_to_img, create_vector_env, NoAutoReset
 
-
+mininterval = 10
 logger.remove()
 logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
@@ -63,13 +61,12 @@ class Trainer:
 
     @staticmethod
     def _create_env_from_config(config, eval=False):
-        noop_max = 0 if eval else config['env_noop_max']
         # env = create_atari_env(
         #     config['game'], noop_max, config['env_frame_skip'], config['env_frame_stack'],
         #     config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'])
         env = create_craftax_env(
-            config['game'], noop_max, config['env_frame_skip'], config['env_frame_stack'],
-            config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'], eval=eval)
+            config['game'], frame_stack=config['env_frame_stack'],
+            time_limit=config['env_time_limit'], eval=eval)
         if eval:
             # FIXME: make it work for crafter
             env = NoAutoReset(env)  # must use options={'force': True} to really reset
@@ -133,7 +130,7 @@ class Trainer:
 
         logger.info("prefill the buffer with randomly collected data")
         random_policy = lambda index: replay_buffer.sample_random_action()
-        for _ in tqdm(range(config['buffer_prefill'] - 1)):
+        for _ in tqdm(range(config['buffer_prefill'] - 1), mininterval=mininterval):
             replay_buffer.step(random_policy)
             metrics_d = {}
             metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
@@ -163,7 +160,7 @@ class Trainer:
 
         step_counter = 0
         logger.info("collect data in real environment")
-        with tqdm(total=replay_buffer.capacity, unit='step', desc='train') as pbar:
+        with tqdm(total=replay_buffer.capacity, unit='step', desc='train', mininterval=mininterval) as pbar:
             while replay_buffer.size < replay_buffer.capacity:
                 collect_policy = self._create_buffer_obs_policy()
                 should_log = False
@@ -249,7 +246,7 @@ class Trainer:
         logger.info("pretrain dynamics model")
         budget = config['pretrain_budget'] * config['pretrain_dyn_p']
         while budget > 0:
-            with tqdm(total=budget, mininterval=30) as pbar:
+            with tqdm(total=budget, mininterval=mininterval) as pbar:
                 for idx in replay_buffer.generate_uniform_indices(
                         config['wm_batch_size'], config['wm_sequence_length'], extra=2):  # 2 for context + next
                     z, logits = obs_model.sample_z(z_dist, idx=idx.flatten(), return_logits=True)
@@ -267,7 +264,7 @@ class Trainer:
         logger.info("pretrain ac")
         budget = config['pretrain_budget'] * (1 - config['pretrain_obs_p'] + config['pretrain_dyn_p'])
         while budget > 0:
-            with tqdm(total=budget, mininterval=30) as pbar:
+            with tqdm(total=budget, mininterval=mininterval) as pbar:
                 for idx in replay_buffer.generate_uniform_indices(
                         config['ac_batch_size'], config['ac_horizon'], extra=2):  # 2 for context + next
                     z = obs_model.sample_z(z_dist, idx=idx.flatten())
@@ -365,10 +362,12 @@ class Trainer:
         env_fn = lambda: Trainer._create_env_from_config(config, eval=True)
 
         # FIXME: this multiproc wont work with craftax jax
-        eval_env = create_vector_env(num_envs, env_fn)
+        eval_env = env_fn() # create_vector_env(num_envs, env_fn())
 
         seed = ((config['seed'] + 13) * 7919 + 13) if config['seed'] is not None else None
         start_obs, _ = eval_env.reset(seed=seed)
+        # add in fake batch and tgt_len dimensions
+        start_obs = start_obs.unsqueeze(0).unsqueeze(1).to(device)
         # start_obs = preprocess_atari_obs(start_obs, device).unsqueeze(1)
 
         dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
@@ -380,7 +379,7 @@ class Trainer:
         num_truncated = 0
         while len(scores) < num_episodes:
             a = dreamer.act()
-            o, r, terminated, truncated, infos = eval_env.step(a.squeeze(1).cpu().numpy())
+            o, r, terminated, truncated, infos = eval_env.step(a.squeeze(1).squeeze(0).cpu().numpy())
 
             not_finished = ~finished
             current_scores[not_finished] += r[not_finished]
@@ -460,8 +459,8 @@ class Trainer:
         recons = recons[:, :, -1]
 
         # for craftax convert state to image
-        o = craftax_symobs_to_img(o.squeeze(1), self.env.env_state)
-        recons = craftax_symobs_to_img(recons.squeeze(1), self.env.env_state)
+        o = craftax_symobs_to_img(o.squeeze(1), self.env.unwrapped.env_state)
+        recons = craftax_symobs_to_img(recons.squeeze(1), self.env.unwrapped.env_state)
         # render observations and reconstructions are two columns
         recon_img = [o.permute(0, 3, 1, 2), recons.permute(0, 3, 1, 2)]
         recon_img = torch.cat(recon_img, dim=0) * 1.0
@@ -489,18 +488,16 @@ class Trainer:
         o = o[:, :-1, -1:]  # remove last time step and use last frame of frame stack
         a, r, g, weights = [x.cpu().numpy() for x in (a, r, g, weights)]
 
-        # FIXME: o [b=5, seq=18, frames=4, dim=8269], why 18? a = [b=5, seq=17]
-        imagine_img = craftax_symobs_to_img(o, self.env.env_state).squeeze(2).reshape(-1, 130, 110, 3)
-        # [5, 17, 130, 110, 3]
-        imagine_img = imagine_img.permute(0, 3, 1, 2) # channels first
+        imagine_img = craftax_symobs_to_img(o, self.env.unwrapped.env_state).squeeze(2).reshape(-1, 130, 110, 3)
+        imagine_img = imagine_img.permute(0, 3, 1, 2) * 1.0 # channels first
         pad = 2
         extra_pad = 38
+        h, w = o.shape[-2:]
         # make an image where the rows are the rollout, cols are batch
         imagine_img = utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))
         imagine_img = utils.to_image(imagine_img[:, extra_pad:])
 
         draw = ImageDraw.Draw(imagine_img)
-        h, w = o.shape[3:5]
         for t in range(r.shape[1]):
             for i in range(r.shape[0]):
                 x = pad + t * (w + pad)

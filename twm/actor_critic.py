@@ -194,7 +194,7 @@ class ActorCritic(nn.Module):
         return returns, advantages
 
     @torch.no_grad()
-    def policy(self, z, h, temperature=1):
+    def policy(self, z: Z, h: Hiddens, temperature=1):
         assert utils.check_no_grad(z, h)
         self.eval()
         x = self._prepare_inputs(z, h)

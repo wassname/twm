@@ -2,7 +2,7 @@ from typing import NewType, List, Dict, Annotated
 from jaxtyping import Float, Int, Bool
 from torch import Tensor, distributions as D
 
-Obs = Float[Tensor, 'b tgt_len odim']
+Obs = Float[Tensor, 'b tgt_len frames odim']
 Z = Float[Tensor, 'b tgt_len z']
 Logits = Float[Tensor, 'b tgt_len z_categoricals z_categories']
 Z_dist = Float[D.Distribution, 'b tgt_len z_categoricals z_categories']

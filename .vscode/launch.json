@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "autoReload": {"enable": true,},
-            "env": {"WANDB_MODE":"disabled","WANDB_SILENT":"true",},
+            "env": {"WANDB_MODE":"disabled","WANDB_SILENT":"true", "TQDM_MININTERVAL": "5"},
             "args": [
                 "--game=Craftax-Symbolic-AutoReset-v1",
                 // "--game=Breakout",
@@ -28,6 +28,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "autoReload": {"enable": true,},
+            "env": {"TQDM_MININTERVAL": "5"},
             "args": [
                 "--wandb='enabled'",
                 // "--game=Craftax-Symbolic-AutoReset-v1",

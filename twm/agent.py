@@ -4,11 +4,13 @@ from torch import nn
 from twm.actor_critic import ActorCritic
 from twm.world_model import WorldModel
 from twm import utils
+from twm.custom_types import Obs
 from jaxtyping import Float
+from typing import Optional
 
 class Agent(nn.Module):
 
-    def __init__(self, config, num_actions):
+    def __init__(self, config: dict, num_actions: int):
         super().__init__()
         self.config = config
         self.wm = WorldModel(config, num_actions)
@@ -19,7 +21,7 @@ class Dreamer:
     # reset: s_t-1, a_t-1, r_t-1, d_t-1, s_t => s_t, h_t-1
     # step:  a_t => s_t+1, h_t, r_t, d_t
 
-    def __init__(self, config, wm, mode, ac=None, store_data=False, start_z_sampler=None, always_compute_obs=False):
+    def __init__(self, config: dict, wm: WorldModel, mode: str, ac: Optional[ActorCritic]=None, store_data=False, start_z_sampler=None, always_compute_obs=False):
         assert mode in ('imagine', 'observe')
         assert mode != 'imagine' or start_z_sampler is not None
         self.config = config
@@ -167,8 +169,8 @@ class Dreamer:
         return self.imagine_reset(start_z, start_a, start_r, start_terminated, start_truncated, keep_start_data)
 
     @torch.no_grad()
-    def observe_reset_single(self, start_o, keep_start_data=False):
-        assert start_o.shape[1] == 1
+    def observe_reset_single(self, start_o: Obs, keep_start_data=False):
+        # assert start_o.shape[1] == 1 # FIXME 4, 8268. Should start with batch size, 2nd should be 1?
         start_a, start_r, start_terminated, start_truncated = self._create_single_data(start_o.shape[0], start_o.device)
         return self.observe_reset(start_o, start_a, start_r, start_terminated, start_truncated, keep_start_data)
 
