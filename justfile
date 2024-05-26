@@ -2,9 +2,9 @@
 
 main:
     . .venv/bin/activate
-    TQDM_MININTERVAL=5 python -O scripts/main.py
+    TQDM_MININTERVAL=30 python -O scripts/main.py --wandb=online
 
 test:
     . .venv/bin/activate
-    # TQDM_MININTERVAL=5 WANDB_MODE=disabled WANDB_SILENT=true python scripts/main.py --config=test --wandb=disabled
+    # TQDM_MININTERVAL=30 WANDB_MODE=disabled WANDB_SILENT=true python scripts/main.py --config=test --wandb=disabled
     python scripts/main.py --config=test

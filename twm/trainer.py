@@ -570,7 +570,7 @@ class Trainer:
         recons = craftax_symobs_to_img(recons.squeeze(1), self.env.unwrapped.env_state)
         # render observations and reconstructions are two columns
         recon_img = [o.permute(0, 3, 1, 2), recons.permute(0, 3, 1, 2)]
-        recon_img = torch.cat(recon_img, dim=0) * 1.0
+        recon_img = torch.cat(recon_img, dim=0) / 255.0
         recon_img = torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)
         recon_img = utils.to_image(recon_img)
 
@@ -618,7 +618,7 @@ class Trainer:
             .squeeze(2)
             .reshape(-1, 130, 110, 3)
         )
-        imagine_img = imagine_img.permute(0, 3, 1, 2) * 1.0  # channels first
+        imagine_img = imagine_img.permute(0, 3, 1, 2)  / 255.0  # channels first
         pad = 2
         extra_pad = 38
         h, w = o.shape[-2:]

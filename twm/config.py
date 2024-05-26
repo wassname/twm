@@ -9,9 +9,9 @@ CONFIGS['default'] = {
 
     # training
     'budget': 1000000000,
-    'pretrain_budget': 30000000,
-    'pretrain_obs_p': 0.3,
-    'pretrain_dyn_p': 0.3,
+    'pretrain_budget': 20000000,
+    'pretrain_obs_p': 0.4,
+    'pretrain_dyn_p': 0.6,
 
     # evaluation
     'eval_every': 5000,
