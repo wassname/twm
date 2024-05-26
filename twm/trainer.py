@@ -19,7 +19,7 @@ from twm.envs.craftax import (
     NoAutoReset,
 )
 
-mininterval = 10
+mininterval = 30
 logger.remove()
 logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
@@ -193,7 +193,7 @@ class Trainer:
         step_counter = 0
         logger.info("collect data in real environment")
         with tqdm(
-            total=replay_buffer.capacity * 1,
+            total=replay_buffer.capacity - replay_buffer.size,
             unit="step",
             desc="train",
             mininterval=mininterval,
@@ -201,6 +201,7 @@ class Trainer:
             while replay_buffer.size < replay_buffer.capacity:
                 collect_policy = self._create_buffer_obs_policy()
                 should_log = False
+                # logger.debug(f"step:0 collect {train_every} data")
                 while (
                     step_counter <= train_every
                     and replay_buffer.size < replay_buffer.capacity
@@ -215,21 +216,26 @@ class Trainer:
 
                     replay_buffer.step(collect_policy)
                     step_counter += 1
+                    pbar.update(1)
 
                     if replay_buffer.size % log_every == 0:
                         should_log = True
+                # logger.debug(f"step:1")
 
                 # train world model and actor-critic
+                # logger.debug(f"train:0 train world model and actor-critic")
                 metrics_hist = []
                 while step_counter >= train_every:
                     step_counter -= train_every
                     metrics_d = self._train_step()
                     metrics_hist.append(metrics_d)
+                # logger.debug(f"train:1")
 
                 metrics_d = metrics.mean_metrics(metrics_hist)
                 metrics.update_metrics(
                     metrics_d, replay_buffer.metrics(), prefix="buffer/"
                 )
+                # logger.debug(f"eval:0 evaluate")
 
                 # evaluate
                 if (
@@ -239,13 +245,14 @@ class Trainer:
                     eval_metrics = self._evaluate(is_final=False)
                     metrics_d.update(eval_metrics)
                     should_log = True
+                # logger.debug(f"eval:1")
 
                 self.summarizer.append(metrics_d)
                 if should_log:
                     s = self.summarizer.summarize()
                     wandb.log(s)
                     logger.debug(s)
-                pbar.update(replay_buffer.size-pbar.n)
+                
 
         logger.info("final evaluation")
         metrics_d = self._evaluate(is_final=True)
@@ -273,8 +280,8 @@ class Trainer:
         logger.info("pretrain observation model")
         wm_total_batch_size = config["wm_batch_size"] * config["wm_sequence_length"]
         budget = config["pretrain_budget"] * config["pretrain_obs_p"]
-        while budget > 0:
-            with tqdm(total=budget * 1.0, mininterval=mininterval) as pbar:
+        with tqdm(total=int(budget), mininterval=mininterval) as pbar:
+            while budget > 0:
                 indices = torch.randperm(
                     replay_buffer.size, device=replay_buffer.device
                 )
@@ -299,8 +306,8 @@ class Trainer:
 
         logger.info("pretrain dynamics model")
         budget = config["pretrain_budget"] * config["pretrain_dyn_p"]
-        while budget > 0:
-            with tqdm(total=budget * 1.0, mininterval=mininterval) as pbar:
+        with tqdm(total=int(budget), mininterval=mininterval) as pbar:
+            while budget > 0:
                 for idx in replay_buffer.generate_uniform_indices(
                     config["wm_batch_size"], config["wm_sequence_length"], extra=2
                 ):  # 2 for context + next
@@ -319,8 +326,8 @@ class Trainer:
                     _ = wm.optimize_pretrain_dyn(
                         z, a, r, terminated, truncated, target_logits
                     )
+                    pbar.update(int(idx.numel()))
                     budget -= idx.numel()
-                    pbar.update(idx.numel())
                     if budget <= 0:
                         break
 
@@ -328,8 +335,8 @@ class Trainer:
         budget = config["pretrain_budget"] * (
             1 - config["pretrain_obs_p"] + config["pretrain_dyn_p"]
         )
-        while budget > 0:
-            with tqdm(total=budget * 1.0, mininterval=mininterval) as pbar:
+        with tqdm(total=budget * 1, mininterval=mininterval) as pbar:
+            while budget > 0:
                 for idx in replay_buffer.generate_uniform_indices(
                     config["ac_batch_size"], config["ac_horizon"], extra=2
                 ):  # 2 for context + next
