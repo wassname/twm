@@ -138,10 +138,11 @@ class Trainer:
 
         @torch.no_grad()
         def sampler(n):
+            device = next(obs_model.parameters()).device
             idx = utils.random_choice(
                 replay_buffer.size, n, device=replay_buffer.device
             )
-            o = replay_buffer.get_obs(idx).unsqueeze(1)
+            o = replay_buffer.get_obs(idx, device=device).unsqueeze(1)
             z = obs_model.eval().encode_sample(o, temperature=temperature).squeeze(1)
             return z
 
@@ -192,7 +193,7 @@ class Trainer:
         step_counter = 0
         logger.info("collect data in real environment")
         with tqdm(
-            total=replay_buffer.capacity * 1.0,
+            total=replay_buffer.capacity * 1,
             unit="step",
             desc="train",
             mininterval=mininterval,
@@ -244,7 +245,7 @@ class Trainer:
                     s = self.summarizer.summarize()
                     wandb.log(s)
                     logger.debug(s)
-                pbar.update_to(replay_buffer.size)
+                pbar.update(replay_buffer.size-pbar.n)
 
         logger.info("final evaluation")
         metrics_d = self._evaluate(is_final=True)
@@ -282,8 +283,8 @@ class Trainer:
                     indices = indices[wm_total_batch_size:]
                     o = replay_buffer.get_obs(idx, device=device)
                     _ = wm.optimize_pretrain_obs(o.unsqueeze(1))
+                    pbar.update(int(idx.numel()))
                     budget -= idx.numel()
-                    pbar.update(idx.numel() * 1.0)
 
         # encode all observations once, since the encoder does not change anymore
         indices = torch.arange(
