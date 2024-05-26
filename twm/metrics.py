@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from wandb.sdk.data_types.base_types.wb_value import WBValue
 
+
 def update_metrics(metrics, new_metrics, prefix=None):
     def process(key, t):
         if isinstance(t, (int, float, np.integer, np.floating)):
@@ -15,7 +16,12 @@ def update_metrics(metrics, new_metrics, prefix=None):
     if prefix is None:
         metrics.update({key: process(key, value) for key, value in new_metrics.items()})
     else:
-        metrics.update({f'{prefix}{key}': process(key, value) for key, value in new_metrics.items()})
+        metrics.update(
+            {
+                f"{prefix}{key}": process(key, value)
+                for key, value in new_metrics.items()
+            }
+        )
     return metrics
 
 
@@ -49,7 +55,6 @@ def mean_metrics(metrics_history, except_keys=None):
 
 
 class MetricsSummarizer:
-
     def __init__(self, except_keys=None):
         self.metrics_history = []
         self.except_keys = set() if except_keys is None else set(except_keys)

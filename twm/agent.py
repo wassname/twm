@@ -8,8 +8,8 @@ from twm.custom_types import Obs
 from jaxtyping import Float
 from typing import Optional
 
-class Agent(nn.Module):
 
+class Agent(nn.Module):
     def __init__(self, config: dict, num_actions: int):
         super().__init__()
         self.config = config
@@ -21,9 +21,18 @@ class Dreamer:
     # reset: s_t-1, a_t-1, r_t-1, d_t-1, s_t => s_t, h_t-1
     # step:  a_t => s_t+1, h_t, r_t, d_t
 
-    def __init__(self, config: dict, wm: WorldModel, mode: str, ac: Optional[ActorCritic]=None, store_data=False, start_z_sampler=None, always_compute_obs=False):
-        assert mode in ('imagine', 'observe')
-        assert mode != 'imagine' or start_z_sampler is not None
+    def __init__(
+        self,
+        config: dict,
+        wm: WorldModel,
+        mode: str,
+        ac: Optional[ActorCritic] = None,
+        store_data=False,
+        start_z_sampler=None,
+        always_compute_obs=False,
+    ):
+        assert mode in ("imagine", "observe")
+        assert mode != "imagine" or start_z_sampler is not None
         self.config = config
         self.wm = wm
         self.ac = ac
@@ -68,8 +77,18 @@ class Dreamer:
     def _zero_h(self, batch_size, device):
         return torch.zeros(batch_size, 1, self.wm.h_dim, device=device)
 
-    def _reset(self, start_z, start_a, start_r, start_terminated, start_truncated, keep_start_data=False):
-        assert utils.same_batch_shape([start_a, start_r, start_terminated, start_truncated])
+    def _reset(
+        self,
+        start_z,
+        start_a,
+        start_r,
+        start_terminated,
+        start_truncated,
+        keep_start_data=False,
+    ):
+        assert utils.same_batch_shape(
+            [start_a, start_r, start_terminated, start_truncated]
+        )
         assert utils.same_batch_shape_time_offset(start_z, start_r, 1)
         assert not (keep_start_data and not self.store_data)
         config = self.config
@@ -79,13 +98,20 @@ class Dreamer:
 
         start_g = wm.to_discounts(start_terminated)
         start_d = torch.logical_or(start_terminated, start_truncated)
-        if self.mode == 'imagine' or (self.mode == 'observe' and config['ac_input_h']):
+        if self.mode == "imagine" or (self.mode == "observe" and config["ac_input_h"]):
             if start_a.shape[1] == 0:
                 h = self._zero_h(start_a.shape[0], start_a.device)
                 mems = None
             else:
                 _, h, mems = dyn_model.predict(
-                    start_z[:, :-1], start_a, start_r[:, :-1], start_g[:, :-1], start_d[:, :-1], heads=[], tgt_length=1)
+                    start_z[:, :-1],
+                    start_a,
+                    start_r[:, :-1],
+                    start_g[:, :-1],
+                    start_d[:, :-1],
+                    heads=[],
+                    tgt_length=1,
+                )
         else:
             h, mems = None, None
 
@@ -107,7 +133,9 @@ class Dreamer:
         self.prev_d = d
 
         if self.store_data:
-            self.h_data = [self._zero_h(start_z.shape[0], start_z.device) if h is None else h]
+            self.h_data = [
+                self._zero_h(start_z.shape[0], start_z.device) if h is None else h
+            ]
 
             if keep_start_data:
                 self.z_data = [start_z]
@@ -140,18 +168,47 @@ class Dreamer:
         return z, h, start_g, start_d
 
     @torch.no_grad()
-    def imagine_reset(self, start_z, start_a, start_r, start_terminated, start_truncated, keep_start_data=False):
-        assert self.mode == 'imagine'
+    def imagine_reset(
+        self,
+        start_z,
+        start_a,
+        start_r,
+        start_terminated,
+        start_truncated,
+        keep_start_data=False,
+    ):
+        assert self.mode == "imagine"
         # returns: z, h, start_g, start_d
-        return self._reset(start_z, start_a, start_r, start_terminated, start_truncated, keep_start_data)
+        return self._reset(
+            start_z,
+            start_a,
+            start_r,
+            start_terminated,
+            start_truncated,
+            keep_start_data,
+        )
 
     @torch.no_grad()
-    def observe_reset(self, start_o, start_a, start_r, start_terminated, start_truncated, keep_start_data=False):
-        assert self.mode == 'observe'
+    def observe_reset(
+        self,
+        start_o,
+        start_a,
+        start_r,
+        start_terminated,
+        start_truncated,
+        keep_start_data=False,
+    ):
+        assert self.mode == "observe"
         obs_model = self.wm.obs_model.eval()
         start_z = obs_model.encode_sample(start_o, temperature=0)
         z, h, start_g, start_d = self._reset(
-            start_z, start_a, start_r, start_terminated, start_truncated, keep_start_data)
+            start_z,
+            start_a,
+            start_r,
+            start_terminated,
+            start_truncated,
+            keep_start_data,
+        )
         return z, h, start_z, start_g, start_d
 
     @staticmethod
@@ -165,38 +222,70 @@ class Dreamer:
     @torch.no_grad()
     def imagine_reset_single(self, start_z, keep_start_data=False):
         assert start_z.shape[1] == 1
-        start_a, start_r, start_terminated, start_truncated = self._create_single_data(start_z.shape[0], start_z.device)
-        return self.imagine_reset(start_z, start_a, start_r, start_terminated, start_truncated, keep_start_data)
+        start_a, start_r, start_terminated, start_truncated = self._create_single_data(
+            start_z.shape[0], start_z.device
+        )
+        return self.imagine_reset(
+            start_z,
+            start_a,
+            start_r,
+            start_terminated,
+            start_truncated,
+            keep_start_data,
+        )
 
     @torch.no_grad()
     def observe_reset_single(self, start_o: Obs, keep_start_data=False):
         # assert start_o.shape[1] == 1 # FIXME 4, 8268. Should start with batch size, 2nd should be 1?
-        start_a, start_r, start_terminated, start_truncated = self._create_single_data(start_o.shape[0], start_o.device)
-        return self.observe_reset(start_o, start_a, start_r, start_terminated, start_truncated, keep_start_data)
+        start_a, start_r, start_terminated, start_truncated = self._create_single_data(
+            start_o.shape[0], start_o.device
+        )
+        return self.observe_reset(
+            start_o,
+            start_a,
+            start_r,
+            start_terminated,
+            start_truncated,
+            keep_start_data,
+        )
 
     def _step(self, a, z, r, g, d, temperature, return_attention):
         config = self.config
-        imagine = self.mode == 'imagine'
+        imagine = self.mode == "imagine"
         assert a.shape[1] == 1
-        assert all(x is None for x in (z, r, g, d)) if imagine else utils.same_batch_shape([a, z, r, g, d])
+        assert (
+            all(x is None for x in (z, r, g, d))
+            if imagine
+            else utils.same_batch_shape([a, z, r, g, d])
+        )
         wm = self.wm.eval()
         obs_model = wm.obs_model
         dyn_model = wm.dyn_model
 
         z_dist = None
-        if imagine or self.config['ac_input_h']:
+        if imagine or self.config["ac_input_h"]:
             assert self.mems is not None or self.prev_r.shape[1] == 0
             assert self.mems is None or a.shape[0] == self.mems[0].shape[1]
-            heads = ['z', 'r', 'g'] if imagine else []
+            heads = ["z", "r", "g"] if imagine else []
             outputs = dyn_model.predict(
-                self.prev_z, a, self.prev_r, self.prev_g, self.stop_mask, tgt_length=1, heads=heads, mems=self.mems,
-                return_attention=return_attention)
-            preds, h, mems, attention = outputs if return_attention else (outputs + (None,))
+                self.prev_z,
+                a,
+                self.prev_r,
+                self.prev_g,
+                self.stop_mask,
+                tgt_length=1,
+                heads=heads,
+                mems=self.mems,
+                return_attention=return_attention,
+            )
+            preds, h, mems, attention = (
+                outputs if return_attention else (outputs + (None,))
+            )
             if imagine:
-                z_dist = preds['z_dist']
+                z_dist = preds["z_dist"]
                 z = obs_model.sample_z(z_dist, temperature=temperature)
-                r = preds['r']
-                g = preds['g']
+                r = preds["r"]
+                g = preds["g"]
         else:
             h, mems, attention = None, None, None
 
@@ -210,8 +299,8 @@ class Dreamer:
             self.cumulative_g = (not_done * self.cumulative_g + done) * g
 
         if imagine:
-            if config['wm_discount_threshold'] > 0:
-                d = (self.cumulative_g < config['wm_discount_threshold'])
+            if config["wm_discount_threshold"] > 0:
+                d = self.cumulative_g < config["wm_discount_threshold"]
                 num_done = d.sum()
                 if num_done > 0:
                     new_start_z = self.start_z_sampler(num_done)
@@ -220,9 +309,9 @@ class Dreamer:
                 d = torch.zeros(a.shape[0], 1, dtype=torch.bool, device=a.device)
 
         stop_mask = torch.cat([self.stop_mask, d], dim=1)
-        memory_length = config['wm_memory_length']
+        memory_length = config["wm_memory_length"]
         if stop_mask.shape[1] > memory_length + 1:
-            stop_mask = stop_mask[:, -(memory_length + 1):]
+            stop_mask = stop_mask[:, -(memory_length + 1) :]
         self.stop_mask = stop_mask
 
         self.mems = mems
@@ -250,13 +339,13 @@ class Dreamer:
 
     @torch.no_grad()
     def imagine_step(self, a, temperature=1, return_attention=False):
-        assert self.mode == 'imagine'
+        assert self.mode == "imagine"
         # returns: z, h, z_dist, r, g, d, weights, [attention]
         return self._step(a, None, None, None, None, temperature, return_attention)
 
     @torch.no_grad()
     def observe_step(self, a, o, r, terminated, truncated, return_attention=False):
-        assert self.mode == 'observe'
+        assert self.mode == "observe"
         wm = self.wm
         obs_model = wm.obs_model
         obs_model.eval()
@@ -264,10 +353,14 @@ class Dreamer:
         g = wm.to_discounts(terminated)
         d = torch.logical_or(terminated, truncated)
         if return_attention:
-            _, h, _, _, _, _, weights, attention = self._step(a, z, r, g, d, temperature=None, return_attention=True)
+            _, h, _, _, _, _, weights, attention = self._step(
+                a, z, r, g, d, temperature=None, return_attention=True
+            )
             return z, h, g, d, weights, attention
         else:
-            _, h, _, _, _, _, weights = self._step(a, z, r, g, d, temperature=None, return_attention=False)
+            _, h, _, _, _, _, weights = self._step(
+                a, z, r, g, d, temperature=None, return_attention=False
+            )
             return z, h, g, d, weights
 
     @torch.no_grad()

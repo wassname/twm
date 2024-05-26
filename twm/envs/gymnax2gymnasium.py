@@ -1,4 +1,5 @@
 """modified from gymnax, to update to gymnasium 1.0.0a2."""
+
 from typing import Optional, Tuple, Union, List
 
 import chex
@@ -33,9 +34,7 @@ def gymnax_space_to_gym_space(space: Space) -> gspc.Space:
         )
         return gspc.Box(low, high, space.shape, space.dtype)
     elif isinstance(space, Dict):
-        return gspc.Dict(
-            {k: gymnax_space_to_gym_space(v) for k, v in space.spaces}
-        )
+        return gspc.Dict({k: gymnax_space_to_gym_space(v) for k, v in space.spaces})
     elif isinstance(space, Tuple):
         return gspc.Tuple(space.spaces)
     else:
@@ -76,16 +75,12 @@ class GymnaxToGymWrapper(gymnasium.Env):
     @property
     def action_space(self):
         """Dynamically adjust action space depending on params"""
-        return gymnax_space_to_gym_space(
-            self._env.action_space(self.env_params)
-        )
+        return gymnax_space_to_gym_space(self._env.action_space(self.env_params))
 
     @property
     def observation_space(self):
         """Dynamically adjust state space depending on params"""
-        return gymnax_space_to_gym_space(
-            self._env.observation_space(self.env_params)
-        )
+        return gymnax_space_to_gym_space(self._env.observation_space(self.env_params))
 
     def _seed(self, seed: Optional[int] = None):
         """Set RNG seed (or use 0)"""
@@ -122,9 +117,7 @@ class GymnaxToGymWrapper(gymnasium.Env):
         o, self.env_state = self._env.reset(reset_key, self.env_params)
         return o, {}
 
-    def render(
-        self, mode="human"
-    ) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
+    def render(self, mode="human") -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         """use underlying environment rendering if it exists, otherwise return None"""
         return getattr(self._env, "render", lambda x, y: None)(
             self.env_state, self.env_params
@@ -157,13 +150,9 @@ class GymnaxToVectorGymWrapper(gymnasium.vector.VectorEnv):
         self._seed(seed)
         # Jit-of-vmap is faster than vmap-of-jit. Map over leading axis of all but env params
         self._env.reset = jax.jit(jax.vmap(self._env.reset, in_axes=(0, None)))
-        self._env.step = jax.jit(
-            jax.vmap(self._env.step, in_axes=(0, 0, 0, None))
-        )
+        self._env.step = jax.jit(jax.vmap(self._env.step, in_axes=(0, 0, 0, None)))
         self.env_params = params if params is not None else env.default_params
-        _, self.env_state = self._env.reset(
-            self.rng, self.env_params
-        )  # Placeholder
+        _, self.env_state = self._env.reset(self.rng, self.env_params)  # Placeholder
         self._batched_rng_split = jax.jit(
             jax.vmap(jax.random.split, in_axes=0, out_axes=1)
         )  # Split all rng keys
@@ -171,16 +160,12 @@ class GymnaxToVectorGymWrapper(gymnasium.vector.VectorEnv):
     @property
     def single_action_space(self):
         """Dynamically adjust action space depending on params"""
-        return gymnax_space_to_gym_space(
-            self._env.action_space(self.env_params)
-        )
+        return gymnax_space_to_gym_space(self._env.action_space(self.env_params))
 
     @property
     def single_observation_space(self):
         """Dynamically adjust state space depending on params"""
-        return gymnax_space_to_gym_space(
-            self._env.observation_space(self.env_params)
-        )
+        return gymnax_space_to_gym_space(self._env.observation_space(self.env_params))
 
     @property
     def action_space(self):
@@ -212,9 +197,7 @@ class GymnaxToVectorGymWrapper(gymnasium.vector.VectorEnv):
             self.env_params = options.get(
                 "env_params", self.env_params
             )  # Allow changing environment parameters on reset
-        self.rng, reset_key = self._batched_rng_split(
-            self.rng
-        )  # Split all keys
+        self.rng, reset_key = self._batched_rng_split(self.rng)  # Split all keys
         o, self.env_state = self._env.reset(reset_key, self.env_params)
         return o, {}
 
@@ -226,9 +209,7 @@ class GymnaxToVectorGymWrapper(gymnasium.vector.VectorEnv):
         )
         return o, r, d, d, info
 
-    def render(
-        self, mode="human"
-    ) -> Optional[Union[RenderFrame, List[RenderFrame]]]:
+    def render(self, mode="human") -> Optional[Union[RenderFrame, List[RenderFrame]]]:
         """use underlying environment rendering if it exists (for first environment), otherwise return None"""
         return getattr(self._env, "render", lambda x, y: None)(
             jax.tree_map(lambda x: x[0], self.env_state), self.env_params

@@ -12,7 +12,12 @@ from tqdm.auto import tqdm
 from twm.agent import Agent, Dreamer
 from twm.replay_buffer import ReplayBuffer
 from twm import utils, metrics
-from twm.envs.craftax import create_craftax_env, craftax_symobs_to_img, create_vector_env, NoAutoReset
+from twm.envs.craftax import (
+    create_craftax_env,
+    craftax_symobs_to_img,
+    create_vector_env,
+    NoAutoReset,
+)
 
 mininterval = 10
 logger.remove()
@@ -20,11 +25,10 @@ logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
 
 class Trainer:
-
     def __init__(self, config):
-        if config['buffer_prefill'] <= 0:
+        if config["buffer_prefill"] <= 0:
             raise ValueError()
-        if config['pretrain_obs_p'] + config['pretrain_dyn_p'] > 1:
+        if config["pretrain_obs_p"] + config["pretrain_dyn_p"] > 1:
             raise ValueError()
 
         self.config = config
@@ -33,28 +37,33 @@ class Trainer:
 
         num_actions = self.env.action_space.n
         self.action_meanings = self.env.get_action_meanings()
-        self.agent = Agent(config, num_actions).to(config['model_device'])
+        self.agent = Agent(config, num_actions).to(config["model_device"])
 
         # metrics that won't be summarized, the last value will be used instead
-        except_keys = ['buffer/size', 'buffer/total_reward', 'buffer/num_episodes']
+        except_keys = ["buffer/size", "buffer/total_reward", "buffer/num_episodes"]
         self.summarizer = metrics.MetricsSummarizer(except_keys=except_keys)
         self.last_eval = 0
         self.total_eval_time = 0
 
     def print_stats(self):
-        count_params = lambda module: sum(p.numel() for p in module.parameters() if p.requires_grad)
+        count_params = lambda module: sum(
+            p.numel() for p in module.parameters() if p.requires_grad
+        )
         agent = self.agent
         wm = agent.wm
         ac = agent.ac
-        print('# Parameters')
-        print('Observation model:', count_params(wm.obs_model))
-        print('Dynamics model:', count_params(wm.dyn_model))
-        print('Actor:', count_params(ac.actor_model))
-        print('Critic:', count_params(ac.critic_model))
-        print('World model:', count_params(wm))
-        print('Actor-critic:', count_params(ac))
-        print('Observation encoder + actor:', count_params(wm.obs_model.encoder) + count_params(ac.actor_model))
-        print('Total:', count_params(agent))
+        print("# Parameters")
+        print("Observation model:", count_params(wm.obs_model))
+        print("Dynamics model:", count_params(wm.dyn_model))
+        print("Actor:", count_params(ac.actor_model))
+        print("Critic:", count_params(ac.critic_model))
+        print("World model:", count_params(wm))
+        print("Actor-critic:", count_params(ac))
+        print(
+            "Observation encoder + actor:",
+            count_params(wm.obs_model.encoder) + count_params(ac.actor_model),
+        )
+        print("Total:", count_params(agent))
 
     def close(self):
         self.env.close()
@@ -65,8 +74,11 @@ class Trainer:
         #     config['game'], noop_max, config['env_frame_skip'], config['env_frame_stack'],
         #     config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'])
         env = create_craftax_env(
-            config['game'], frame_stack=config['env_frame_stack'],
-            time_limit=config['env_time_limit'], eval=eval)
+            config["game"],
+            frame_stack=config["env_frame_stack"],
+            time_limit=config["env_time_limit"],
+            eval=eval,
+        )
         if eval:
             # FIXME: make it work for crafter
             env = NoAutoReset(env)  # must use options={'force': True} to really reset
@@ -86,15 +98,27 @@ class Trainer:
         def policy(index):
             nonlocal dreamer
             if dreamer is None:
-                prefix = config['wm_memory_length'] - 1
-                start_o = replay_buffer.get_obs([[index]], device=device, prefix=prefix + 1)
-                start_a = replay_buffer.get_actions([[index - 1]], device=device, prefix=prefix)
-                start_r = replay_buffer.get_rewards([[index - 1]], device=device, prefix=prefix)
-                start_terminated = replay_buffer.get_terminated([[index - 1]], device=device, prefix=prefix)
-                start_truncated = replay_buffer.get_truncated([[index - 1]], device=device, prefix=prefix)
+                prefix = config["wm_memory_length"] - 1
+                start_o = replay_buffer.get_obs(
+                    [[index]], device=device, prefix=prefix + 1
+                )
+                start_a = replay_buffer.get_actions(
+                    [[index - 1]], device=device, prefix=prefix
+                )
+                start_r = replay_buffer.get_rewards(
+                    [[index - 1]], device=device, prefix=prefix
+                )
+                start_terminated = replay_buffer.get_terminated(
+                    [[index - 1]], device=device, prefix=prefix
+                )
+                start_truncated = replay_buffer.get_truncated(
+                    [[index - 1]], device=device, prefix=prefix
+                )
 
-                dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
-                dreamer.observe_reset(start_o, start_a, start_r, start_terminated, start_truncated)
+                dreamer = Dreamer(config, wm, mode="observe", ac=ac, store_data=False)
+                dreamer.observe_reset(
+                    start_o, start_a, start_r, start_terminated, start_truncated
+                )
                 a = dreamer.act()
             else:
                 o = replay_buffer.get_obs([[index]], device=device)
@@ -105,6 +129,7 @@ class Trainer:
                 dreamer.observe_step(a, o, r, terminated, truncated)
                 a = dreamer.act()
             return a.squeeze().item()
+
         return policy
 
     def _create_start_z_sampler(self, temperature):
@@ -113,7 +138,9 @@ class Trainer:
 
         @torch.no_grad()
         def sampler(n):
-            idx = utils.random_choice(replay_buffer.size, n, device=replay_buffer.device)
+            idx = utils.random_choice(
+                replay_buffer.size, n, device=replay_buffer.device
+            )
             o = replay_buffer.get_obs(idx).unsqueeze(1)
             z = obs_model.eval().encode_sample(o, temperature=temperature).squeeze(1)
             return z
@@ -130,10 +157,10 @@ class Trainer:
 
         logger.info("prefill the buffer with randomly collected data")
         random_policy = lambda index: replay_buffer.sample_random_action()
-        for _ in tqdm(range(config['buffer_prefill'] - 1), mininterval=mininterval):
+        for _ in tqdm(range(config["buffer_prefill"] - 1), mininterval=mininterval):
             replay_buffer.step(random_policy)
             metrics_d = {}
-            metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+            metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix="buffer/")
             self.summarizer.append(metrics_d)
             if replay_buffer.size % log_every == 0:
                 wandb.log(self.summarizer.summarize())
@@ -141,33 +168,47 @@ class Trainer:
         # final prefill step
         replay_buffer.step(random_policy)
         metrics_d = {}
-        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix="buffer/")
 
         # pretrain on the prefilled data
         self._pretrain()
 
         eval_metrics = self._evaluate(is_final=False)
-        metrics.update(eval_metrics)
+        metrics_d.update(eval_metrics)
         self.summarizer.append(metrics_d)
         wandb.log(self.summarizer.summarize())
 
-        budget = config['budget'] - config['pretrain_budget']
+        budget = config["budget"] - config["pretrain_budget"]
         budget_per_step = 0
-        budget_per_step += config['wm_train_steps'] * config['wm_batch_size'] * config['wm_sequence_length']
-        budget_per_step += config['ac_batch_size'] * config['ac_horizon']
+        budget_per_step += (
+            config["wm_train_steps"]
+            * config["wm_batch_size"]
+            * config["wm_sequence_length"]
+        )
+        budget_per_step += config["ac_batch_size"] * config["ac_horizon"]
         num_batches = budget / budget_per_step
-        train_every = (replay_buffer.capacity - config['buffer_prefill']) / num_batches
+        train_every = (replay_buffer.capacity - config["buffer_prefill"]) / num_batches
 
         step_counter = 0
         logger.info("collect data in real environment")
-        with tqdm(total=replay_buffer.capacity, unit='step', desc='train', mininterval=mininterval) as pbar:
+        with tqdm(
+            total=replay_buffer.capacity * 1.0,
+            unit="step",
+            desc="train",
+            mininterval=mininterval,
+        ) as pbar:
             while replay_buffer.size < replay_buffer.capacity:
                 collect_policy = self._create_buffer_obs_policy()
                 should_log = False
-                while step_counter <= train_every and replay_buffer.size < replay_buffer.capacity:
-                    if replay_buffer.size - self.last_eval >= config['eval_every']:
+                while (
+                    step_counter <= train_every
+                    and replay_buffer.size < replay_buffer.capacity
+                ):
+                    if replay_buffer.size - self.last_eval >= config["eval_every"]:
                         metrics_d = self._evaluate(is_final=False)
-                        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+                        metrics.update_metrics(
+                            metrics_d, replay_buffer.metrics(), prefix="buffer/"
+                        )
                         self.summarizer.append(metrics_d)
                         wandb.log(self.summarizer.summarize())
 
@@ -185,13 +226,17 @@ class Trainer:
                     metrics_hist.append(metrics_d)
 
                 metrics_d = metrics.mean_metrics(metrics_hist)
-                metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+                metrics.update_metrics(
+                    metrics_d, replay_buffer.metrics(), prefix="buffer/"
+                )
 
                 # evaluate
-                if replay_buffer.size - self.last_eval >= config['eval_every'] and \
-                        replay_buffer.size < replay_buffer.capacity:
+                if (
+                    replay_buffer.size - self.last_eval >= config["eval_every"]
+                    and replay_buffer.size < replay_buffer.capacity
+                ):
                     eval_metrics = self._evaluate(is_final=False)
-                    metrics.update(eval_metrics)
+                    metrics_d.update(eval_metrics)
                     should_log = True
 
                 self.summarizer.append(metrics_d)
@@ -203,15 +248,15 @@ class Trainer:
 
         logger.info("final evaluation")
         metrics_d = self._evaluate(is_final=True)
-        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix='buffer/')
+        metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix="buffer/")
         self.summarizer.append(metrics_d)
         wandb.log(self.summarizer.summarize())
         self.print_stats()
 
         # save final model
-        if config['save']:
-            filename = 'agent_final.pt'
-            checkpoint = {'config': dict(config), 'state_dict': self.agent.state_dict()}
+        if config["save"]:
+            filename = "agent_final.pt"
+            checkpoint = {"config": dict(config), "state_dict": self.agent.state_dict()}
             torch.save(checkpoint, os.path.join(wandb.run.dir, filename))
             wandb.save(filename)
 
@@ -225,65 +270,89 @@ class Trainer:
         replay_buffer = self.replay_buffer
 
         logger.info("pretrain observation model")
-        wm_total_batch_size = config['wm_batch_size'] * config['wm_sequence_length']
-        budget = config['pretrain_budget'] * config['pretrain_obs_p']
+        wm_total_batch_size = config["wm_batch_size"] * config["wm_sequence_length"]
+        budget = config["pretrain_budget"] * config["pretrain_obs_p"]
         while budget > 0:
-            indices = torch.randperm(replay_buffer.size, device=replay_buffer.device)
-            while len(indices) > 0 and budget > 0:
-                idx = indices[:wm_total_batch_size]
-                indices = indices[wm_total_batch_size:]
-                o = replay_buffer.get_obs(idx, device=device)
-                _ = wm.optimize_pretrain_obs(o.unsqueeze(1))
-                budget -= idx.numel()
+            with tqdm(total=budget * 1.0, mininterval=mininterval) as pbar:
+                indices = torch.randperm(
+                    replay_buffer.size, device=replay_buffer.device
+                )
+                while len(indices) > 0 and budget > 0:
+                    idx = indices[:wm_total_batch_size]
+                    indices = indices[wm_total_batch_size:]
+                    o = replay_buffer.get_obs(idx, device=device)
+                    _ = wm.optimize_pretrain_obs(o.unsqueeze(1))
+                    budget -= idx.numel()
+                    pbar.update(idx.numel() * 1.0)
 
         # encode all observations once, since the encoder does not change anymore
-        indices = torch.arange(replay_buffer.size, dtype=torch.long, device=replay_buffer.device)
-        o = replay_buffer.get_obs(indices.unsqueeze(0), prefix=1, device=device, return_next=True)  # 1 for context
+        indices = torch.arange(
+            replay_buffer.size, dtype=torch.long, device=replay_buffer.device
+        )
+        o = replay_buffer.get_obs(
+            indices.unsqueeze(0), prefix=1, device=device, return_next=True
+        )  # 1 for context
         o = o.squeeze(0).unsqueeze(1)
         with torch.no_grad():
             z_dist = obs_model.eval().encode(o)
 
         logger.info("pretrain dynamics model")
-        budget = config['pretrain_budget'] * config['pretrain_dyn_p']
+        budget = config["pretrain_budget"] * config["pretrain_dyn_p"]
         while budget > 0:
-            with tqdm(total=budget, mininterval=mininterval) as pbar:
+            with tqdm(total=budget * 1.0, mininterval=mininterval) as pbar:
                 for idx in replay_buffer.generate_uniform_indices(
-                        config['wm_batch_size'], config['wm_sequence_length'], extra=2):  # 2 for context + next
-                    z, logits = obs_model.sample_z(z_dist, idx=idx.flatten(), return_logits=True)
-                    z, logits = [x.squeeze(1).unflatten(0, idx.shape) for x in (z, logits)]
+                    config["wm_batch_size"], config["wm_sequence_length"], extra=2
+                ):  # 2 for context + next
+                    z, logits = obs_model.sample_z(
+                        z_dist, idx=idx.flatten(), return_logits=True
+                    )
+                    z, logits = [
+                        x.squeeze(1).unflatten(0, idx.shape) for x in (z, logits)
+                    ]
                     z = z[:, :-1]
                     target_logits = logits[:, 2:]
                     idx = idx[:, :-2]
-                    _, a, r, terminated, truncated, _ = replay_buffer.get_data(idx, device=device, prefix=1)
-                    _ = wm.optimize_pretrain_dyn(z, a, r, terminated, truncated, target_logits)
+                    _, a, r, terminated, truncated, _ = replay_buffer.get_data(
+                        idx, device=device, prefix=1
+                    )
+                    _ = wm.optimize_pretrain_dyn(
+                        z, a, r, terminated, truncated, target_logits
+                    )
                     budget -= idx.numel()
                     pbar.update(idx.numel())
                     if budget <= 0:
                         break
 
         logger.info("pretrain ac")
-        budget = config['pretrain_budget'] * (1 - config['pretrain_obs_p'] + config['pretrain_dyn_p'])
+        budget = config["pretrain_budget"] * (
+            1 - config["pretrain_obs_p"] + config["pretrain_dyn_p"]
+        )
         while budget > 0:
-            with tqdm(total=budget, mininterval=mininterval) as pbar:
+            with tqdm(total=budget * 1.0, mininterval=mininterval) as pbar:
                 for idx in replay_buffer.generate_uniform_indices(
-                        config['ac_batch_size'], config['ac_horizon'], extra=2):  # 2 for context + next
+                    config["ac_batch_size"], config["ac_horizon"], extra=2
+                ):  # 2 for context + next
                     z = obs_model.sample_z(z_dist, idx=idx.flatten())
                     z = z.squeeze(1).unflatten(0, idx.shape)
                     idx = idx[:, :-2]
-                    _, a, r, terminated, truncated, _ = replay_buffer.get_data(idx, device=device, prefix=1)
+                    _, a, r, terminated, truncated, _ = replay_buffer.get_data(
+                        idx, device=device, prefix=1
+                    )
                     d = torch.logical_or(terminated, truncated)
-                    if config['ac_input_h']:
+                    if config["ac_input_h"]:
                         g = wm.to_discounts(terminated)
-                        tgt_length = config['ac_horizon'] + 1
+                        tgt_length = config["ac_horizon"] + 1
                         with torch.no_grad():
-                            _, h, _ = wm.dyn_model.eval().predict(z[:, :-1], a, r, g, d[:, :-1], tgt_length)
+                            _, h, _ = wm.dyn_model.eval().predict(
+                                z[:, :-1], a, r, g, d[:, :-1], tgt_length
+                            )
                     else:
                         h = None
                     g = wm.to_discounts(d)
                     z, r, g, d = [x[:, 1:] for x in (z, r, g, d)]
                     _ = ac.optimize_pretrain(z, h, r, g, d)
                     budget -= idx.numel()
-                    pbar.update(idx.numel())
+                    pbar.update(idx.numel() * 1.0)
                     if budget <= 0:
                         break
         ac.sync_target()
@@ -297,16 +366,21 @@ class Trainer:
         replay_buffer = self.replay_buffer
 
         # train wm
-        for _ in range(config['wm_train_steps']):
+        for _ in range(config["wm_train_steps"]):
             metrics_i = {}
-            idx = replay_buffer.sample_indices(config['wm_batch_size'], config['wm_sequence_length'])
-            o, a, r, terminated, truncated, _ = \
-                replay_buffer.get_data(idx, device=device, prefix=1, return_next_obs=True)  # 1 for context
+            idx = replay_buffer.sample_indices(
+                config["wm_batch_size"], config["wm_sequence_length"]
+            )
+            o, a, r, terminated, truncated, _ = replay_buffer.get_data(
+                idx, device=device, prefix=1, return_next_obs=True
+            )  # 1 for context
 
             z, h, met = wm.optimize(o, a, r, terminated, truncated)
-            metrics.update_metrics(metrics_i, met, prefix='wm/')
+            metrics.update_metrics(metrics_i, met, prefix="wm/")
 
-            o, a, r, terminated, truncated = [x[:, :-1] for x in (o, a, r, terminated, truncated)]
+            o, a, r, terminated, truncated = [
+                x[:, :-1] for x in (o, a, r, terminated, truncated)
+            ]
 
         metrics_d = metrics_i  # only use last metrics
 
@@ -318,21 +392,33 @@ class Trainer:
         start_terminated = create_start(terminated, 1)
         start_truncated = create_start(truncated, 1)
 
-        idx = utils.random_choice(start_z.shape[0], config['ac_batch_size'], device=start_z.device)
-        start_z, start_a, start_r, start_terminated, start_truncated = \
-            [x[idx] for x in (start_z, start_a, start_r, start_terminated, start_truncated)]
+        idx = utils.random_choice(
+            start_z.shape[0], config["ac_batch_size"], device=start_z.device
+        )
+        start_z, start_a, start_r, start_terminated, start_truncated = [
+            x[idx]
+            for x in (start_z, start_a, start_r, start_terminated, start_truncated)
+        ]
 
-        dreamer = Dreamer(config, wm, mode='imagine', ac=ac, store_data=True,
-                          start_z_sampler=self._create_start_z_sampler(temperature=1))
-        dreamer.imagine_reset(start_z, start_a, start_r, start_terminated, start_truncated)
-        for _ in range(config['ac_horizon']):
+        dreamer = Dreamer(
+            config,
+            wm,
+            mode="imagine",
+            ac=ac,
+            store_data=True,
+            start_z_sampler=self._create_start_z_sampler(temperature=1),
+        )
+        dreamer.imagine_reset(
+            start_z, start_a, start_r, start_terminated, start_truncated
+        )
+        for _ in range(config["ac_horizon"]):
             a = dreamer.act()
             dreamer.imagine_step(a)
         z, o, h, a, r, g, d, weights = dreamer.get_data()
-        if config['wm_discount_threshold'] == 0:
+        if config["wm_discount_threshold"] == 0:
             d = None  # save some computation, since all dones are False in this case
         ac_metrics = ac.optimize(z, h, a, r, g, d, weights)
-        metrics.update_metrics(metrics_d, ac_metrics, prefix='ac/')
+        metrics.update_metrics(metrics_d, ac_metrics, prefix="ac/")
 
         return metrics_d
 
@@ -347,95 +433,106 @@ class Trainer:
         replay_buffer = self.replay_buffer
 
         metrics_d = {}
-        metrics_d['buffer/visits'] = replay_buffer.visit_histogram()
-        metrics_d['buffer/sample_probs'] = replay_buffer.sample_probs_histogram()
+        metrics_d["buffer/visits"] = replay_buffer.visit_histogram()
+        metrics_d["buffer/sample_probs"] = replay_buffer.sample_probs_histogram()
 
         recon_img, imagine_img = self._create_eval_images(is_final)
-        metrics_d['eval/recons'] = wandb.Image(recon_img)
+        metrics_d["eval/recons"] = wandb.Image(recon_img)
         if imagine_img is not None:
-            metrics_d['eval/imagine'] = wandb.Image(imagine_img)
+            metrics_d["eval/imagine"] = wandb.Image(imagine_img)
 
         # similar to evaluation proposed in https://arxiv.org/pdf/2007.05929.pdf (SPR) section 4.1
-        num_episodes = config['final_eval_episodes'] if is_final else config['eval_episodes']
-        num_envs = max(min(num_episodes, int(multiprocessing.cpu_count() * config['cpu_p'])), 1)
-        logger.debug(f'num_envs: {num_envs}')
+        num_episodes = (
+            config["final_eval_episodes"] if is_final else config["eval_episodes"]
+        )
+        num_envs = max(
+            min(num_episodes, int(multiprocessing.cpu_count() * config["cpu_p"])), 1
+        )
+        # logger.debug(f'num_envs: {num_envs}')
         env_fn = lambda: Trainer._create_env_from_config(config, eval=True)
 
         # FIXME: this multiproc wont work with craftax jax
-        eval_env = env_fn() # create_vector_env(num_envs, env_fn())
+        num_envs = 1  # FIXME
+        eval_env = env_fn()  # create_vector_env(num_envs, env_fn())
 
-        seed = ((config['seed'] + 13) * 7919 + 13) if config['seed'] is not None else None
+        seed = (
+            ((config["seed"] + 13) * 7919 + 13) if config["seed"] is not None else None
+        )
         start_obs, _ = eval_env.reset(seed=seed)
         # add in fake batch and tgt_len dimensions
         start_obs = start_obs.unsqueeze(0).unsqueeze(1).to(device)
         # start_obs = preprocess_atari_obs(start_obs, device).unsqueeze(1)
 
-        dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
+        dreamer = Dreamer(config, wm, mode="observe", ac=ac, store_data=False)
         dreamer.observe_reset_single(start_obs)
 
         scores = []
-        current_scores = np.zeros(num_envs)
-        finished = np.zeros(num_envs, dtype=bool)
+        current_score = 0
+        finished = 0
         num_truncated = 0
         while len(scores) < num_episodes:
             a = dreamer.act()
-            o, r, terminated, truncated, infos = eval_env.step(a.squeeze(1).squeeze(0).cpu().numpy())
+            o, r, terminated, truncated, infos = eval_env.step(
+                a.squeeze(1).squeeze(0).cpu().numpy()
+            )
+            current_score += r
+            finished = truncated | terminated
 
-            not_finished = ~finished
-            current_scores[not_finished] += r[not_finished]
-            lives = infos['lives']
-            for i in range(num_envs):
-                if not finished[i]:
-                    if truncated[i]:
-                        num_truncated += 1
-                        finished[i] = True
-                    elif terminated[i] and lives[i] == 0:
-                        finished[i] = True
-
-            # o = preprocess_atari_obs(o, device).unsqueeze(1)
-            r = torch.as_tensor(r, dtype=torch.float, device=device).unsqueeze(1)
-            terminated = torch.as_tensor(terminated, device=device).unsqueeze(1)
-            truncated = torch.as_tensor(truncated, device=device).unsqueeze(1)
+            # o = preprocess_atari_obs(o, device)
+            o = o.unsqueeze(0).unsqueeze(1).to(device)
+            r = (
+                torch.as_tensor(r, dtype=torch.float, device=device)
+                .unsqueeze(0)
+                .unsqueeze(1)
+            )
+            terminated = (
+                torch.as_tensor(terminated, device=device).unsqueeze(0).unsqueeze(1)
+            )
+            truncated = (
+                torch.as_tensor(truncated, device=device).unsqueeze(0).unsqueeze(1)
+            )
             z, h, _, d, _ = dreamer.observe_step(a, o, r, terminated, truncated)
 
-            if np.all(finished):
-                # only reset if all environments are finished to remove bias for shorter episodes
-                scores.extend(current_scores.tolist())
+            if finished:
+                scores.append(current_score)
                 num_scores = len(scores)
                 if num_scores >= num_episodes:
                     if num_scores > num_episodes:
                         scores = scores[:num_episodes]  # unbiased, just pick first
                     break
-                current_scores[:] = 0
-                finished[:] = False
+                current_score = 0
+                finished = False
                 if seed is not None:
                     seed = seed * 3 + 13 + num_envs
-                start_o, _ = eval_env.reset(seed=seed, options={'force': True})
+                start_o, _ = eval_env.reset(seed=seed, options={"force": True})
+                start_o = start_o.unsqueeze(0).unsqueeze(1).to(device)
                 # start_o = preprocess_atari_obs(start_o, device).unsqueeze(1)
-                dreamer = Dreamer(config, wm, mode='observe', ac=ac, store_data=False)
+                dreamer = Dreamer(config, wm, mode="observe", ac=ac, store_data=False)
                 dreamer.observe_reset_single(start_o)
-        eval_env.close(terminate=True)
+        eval_env.close()
         if num_truncated > 0:
-            print(f'{num_truncated} episode(s) truncated')
+            print(f"{num_truncated} episode(s) truncated")
 
         score_mean = np.mean(scores)
         score_metrics = {
-            'score_mean': score_mean,
-            'score_std': np.std(scores),
-            'score_median': np.median(scores),
-            'score_min': np.min(scores),
-            'score_max': np.max(scores),
+            "score_mean": score_mean,
+            "score_std": np.std(scores),
+            "score_median": np.median(scores),
+            "score_min": np.min(scores),
+            "score_max": np.max(scores),
             # 'hns': compute_atari_hns(config['game'], score_mean)
         }
-        metrics_d.update({f'eval/{key}': value for key, value in score_metrics.items()})
+        metrics_d.update({f"eval/{key}": value for key, value in score_metrics.items()})
         if is_final:
-            metrics_d.update({f'eval/final_{key}': value for key, value in score_metrics.items()})
+            metrics_d.update(
+                {f"eval/final_{key}": value for key, value in score_metrics.items()}
+            )
 
         end_time = time.time()
         eval_time = end_time - start_time
 
         self.total_eval_time += eval_time
-        metrics_d['eval/total_time'] = self.total_eval_time
+        metrics_d["eval/total_time"] = self.total_eval_time
 
         self.last_eval = replay_buffer.size
         return metrics_d
@@ -449,7 +546,9 @@ class Trainer:
         obs_model = agent.wm.obs_model.eval()
 
         # recon_img
-        idx = utils.random_choice(replay_buffer.size, 10, device=replay_buffer.device).unsqueeze(1)
+        idx = utils.random_choice(
+            replay_buffer.size, 10, device=replay_buffer.device
+        ).unsqueeze(1)
         o = replay_buffer.get_obs(idx, device=device)
 
         z = obs_model.encode_sample(o, temperature=0)
@@ -472,14 +571,32 @@ class Trainer:
         start_o = replay_buffer.get_obs(idx, prefix=1, device=device)  # 1 for context
         start_a = replay_buffer.get_actions(idx, prefix=1, device=device)[:, :-1]
         start_r = replay_buffer.get_rewards(idx, prefix=1, device=device)[:, :-1]
-        start_terminated = replay_buffer.get_terminated(idx, prefix=1, device=device)[:, :-1]
-        start_truncated = replay_buffer.get_truncated(idx, prefix=1, device=device)[:, :-1]
+        start_terminated = replay_buffer.get_terminated(idx, prefix=1, device=device)[
+            :, :-1
+        ]
+        start_truncated = replay_buffer.get_truncated(idx, prefix=1, device=device)[
+            :, :-1
+        ]
         start_z = obs_model.encode_sample(start_o, temperature=0)
 
-        horizon = 100 if is_final else config['wm_sequence_length']
-        dreamer = Dreamer(config, agent.wm, mode='imagine', ac=agent.ac, store_data=True,
-                          start_z_sampler=self._create_start_z_sampler(temperature=0), always_compute_obs=True)
-        dreamer.imagine_reset(start_z, start_a, start_r, start_terminated, start_truncated, keep_start_data=True)
+        horizon = 100 if is_final else config["wm_sequence_length"]
+        dreamer = Dreamer(
+            config,
+            agent.wm,
+            mode="imagine",
+            ac=agent.ac,
+            store_data=True,
+            start_z_sampler=self._create_start_z_sampler(temperature=0),
+            always_compute_obs=True,
+        )
+        dreamer.imagine_reset(
+            start_z,
+            start_a,
+            start_r,
+            start_terminated,
+            start_truncated,
+            keep_start_data=True,
+        )
         for _ in range(horizon):
             a = dreamer.act()
             dreamer.imagine_step(a, temperature=1)
@@ -488,13 +605,19 @@ class Trainer:
         o = o[:, :-1, -1:]  # remove last time step and use last frame of frame stack
         a, r, g, weights = [x.cpu().numpy() for x in (a, r, g, weights)]
 
-        imagine_img = craftax_symobs_to_img(o, self.env.unwrapped.env_state).squeeze(2).reshape(-1, 130, 110, 3)
-        imagine_img = imagine_img.permute(0, 3, 1, 2) * 1.0 # channels first
+        imagine_img = (
+            craftax_symobs_to_img(o, self.env.unwrapped.env_state)
+            .squeeze(2)
+            .reshape(-1, 130, 110, 3)
+        )
+        imagine_img = imagine_img.permute(0, 3, 1, 2) * 1.0  # channels first
         pad = 2
         extra_pad = 38
         h, w = o.shape[-2:]
         # make an image where the rows are the rollout, cols are batch
-        imagine_img = utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))
+        imagine_img = utils.make_grid(
+            imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad)
+        )
         imagine_img = utils.to_image(imagine_img[:, extra_pad:])
 
         draw = ImageDraw.Draw(imagine_img)
@@ -516,7 +639,11 @@ class Trainer:
                     color_gb = int(weight * 80)
                     color_r = int(weight * (255 + (-reward) * 255) / 2)
                     color = (color_r, color_gb, color_gb)  # red
-                draw.text((x + 2, y + 2), f'a: {self.action_meanings[a[i, t]][:7]: >7}', fill=color)
-                draw.text((x + 2, y + 2 + 10), f'r: {r[i, t]: .4f}', fill=color)
-                draw.text((x + 2, y + 2 + 20), f'g: {g[i, t]: .4f}', fill=color)
+                draw.text(
+                    (x + 2, y + 2),
+                    f"a: {self.action_meanings[a[i, t]][:7]: >7}",
+                    fill=color,
+                )
+                draw.text((x + 2, y + 2 + 10), f"r: {r[i, t]: .4f}", fill=color)
+                draw.text((x + 2, y + 2 + 20), f"g: {g[i, t]: .4f}", fill=color)
         return recon_img, imagine_img
