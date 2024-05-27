@@ -18,6 +18,7 @@ from twm.envs.craftax import (
     create_vector_env,
     NoAutoReset,
 )
+from einops import rearrange, repeat, reduce
 
 mininterval = 30
 logger.remove()
@@ -511,7 +512,7 @@ class Trainer:
                 current_score = 0
                 finished = False
                 if seed is not None:
-                    seed = np.in64(seed + 13 + num_envs)
+                    seed = np.int64(seed + 13 + num_envs)
                 start_o, _ = eval_env.reset(seed=seed, options={"force": True})
                 start_o = start_o.unsqueeze(0).unsqueeze(1).to(device)
                 # start_o = preprocess_atari_obs(start_o, device).unsqueeze(1)
@@ -547,6 +548,7 @@ class Trainer:
 
     @torch.no_grad()
     def _create_eval_images(self, is_final=False):
+        """Create images to QC reconstructed images and imagined images."""
         config = self.config
         agent = self.agent
         replay_buffer = self.replay_buffer
@@ -568,9 +570,17 @@ class Trainer:
         # for craftax convert state to image
         o = craftax_symobs_to_img(o.squeeze(1), self.env.unwrapped.env_state)
         recons = craftax_symobs_to_img(recons.squeeze(1), self.env.unwrapped.env_state)
-        # render observations and reconstructions are two columns
-        recon_img = [o.permute(0, 3, 1, 2), recons.permute(0, 3, 1, 2)]
-        recon_img = torch.cat(recon_img, dim=0) / 255.0
+        # render observations and reconstructions as two columns
+        # the first is the original observation, the second is the reconstruction
+        # QC: the reconstruction should look similar
+        # recon_img = [o.permute(0, 3, 1, 2), recons.permute(0, 3, 1, 2)]
+        # recon_img = torch.cat([o, recons], dim=0) / 255.0
+        recon_img = rearrange([o, recons], 't b h w c -> (t b) c h w') / 255.0
+
+        # FIXME:
+        utils.to_image(torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)).save('recon_img1.png')
+        utils.to_image(torchvision.utils.make_grid(recon_img, nrow=o.shape[1], padding=2)).save('recon_img2.png')
+
         recon_img = torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)
         recon_img = utils.to_image(recon_img)
 
@@ -613,21 +623,33 @@ class Trainer:
         o = o[:, :-1, -1:]  # remove last time step and use last frame of frame stack
         a, r, g, weights = [x.cpu().numpy() for x in (a, r, g, weights)]
 
+        # [b=5, t=17, 1, 8268] -> [5, 17, 130, 110, 3]
         imagine_img = (
             craftax_symobs_to_img(o, self.env.unwrapped.env_state)
             .squeeze(2)
-            .reshape(-1, 130, 110, 3)
+            # .reshape(-1, 130, 110, 3)
         )
-        imagine_img = imagine_img.permute(0, 3, 1, 2)  / 255.0  # channels first
+        imagine_img = rearrange(imagine_img, 'b t h w c -> (t b) c h w') / 255.0
+        # imagine_img = imagine_img.permute(0, 3, 1, 2)  / 255.0  # channels first
+        # [5*17, 3, 130, 110]
         pad = 2
         extra_pad = 38
-        h, w = o.shape[-2:]
-        # make an image where the rows are the rollout, cols are batch
+        h, w = imagine_img.shape[-2:]
+        # make an imagined image where the rows are the rollout, cols are batch
+        # that means you should look at each TODO and check for consistency and realism (are trees and coastlines teleporting? are the colors consistent? or is psychadelic?)
+        # note that we fill in some values from the true state, so it's not a perfect representation
+
+        # FIXME:
+        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img1.png')
+        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))).save('imagine_img2.png')
+
+
         imagine_img = utils.make_grid(
-            imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad)
+            imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad)
         )
         imagine_img = utils.to_image(imagine_img[:, extra_pad:])
 
+        # draw action, reward, and discount on the imagined image for each batch
         draw = ImageDraw.Draw(imagine_img)
         for t in range(r.shape[1]):
             for i in range(r.shape[0]):

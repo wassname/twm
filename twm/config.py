@@ -99,4 +99,4 @@ CONFIGS['default'] = {
     'critic_target_interval': 1
 }
 
-CONFIGS['test'] = {**CONFIGS['default'], 'buffer_capacity': 10000, 'buffer_prefill': 3000, 'pretrain_budget': 50000, 'eval_every': 500, 'env_time_limit': 2700 }
+CONFIGS['test'] = {**CONFIGS['default'], 'buffer_capacity': 10000, 'buffer_prefill': 5000, 'pretrain_budget': 50000, 'eval_every': 500, 'env_time_limit': 2700 }

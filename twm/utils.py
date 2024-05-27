@@ -55,7 +55,20 @@ class AdamOptim:
 
 @torch.no_grad()
 def make_grid(tensor, nrow, padding, pad_value=0):
-    # modified version of torchvision.utils.make_grid that supports different paddings for x and y
+    """
+    Modified version of torchvision.utils.make_grid that supports different paddings for x and y.
+
+    Args:
+        tensor (Tensor or list): 4D mini-batch Tensor of shape (B x C x H x W)
+            or a list of images all of the same size.
+        nrow (int, optional): Number of images displayed in each row of the grid.
+            The final grid size is ``(B / nrow, nrow)``. Default: ``8``.
+        padding (list,): amount of padding. 
+        pad_value (float, optional): Value for the padded pixels. Default: ``0``.
+
+    Returns:
+        grid (Tensor): the tensor containing grid of images.
+        """
     nmaps = tensor.size(0)
     xmaps = min(nrow, nmaps)
     ymaps = int(math.ceil(float(nmaps) / xmaps))

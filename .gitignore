@@ -1,5 +1,6 @@
 /wandb/
-
+journal.md
+/*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -130,4 +131,4 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-journal.md
+

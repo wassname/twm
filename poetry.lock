@@ -622,6 +622,17 @@ files = [
 six = ">=1.4.0"
 
 [[package]]
+name = "einops"
+version = "0.8.0"
+description = "A new flavour of deep learning operations"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "einops-0.8.0-py3-none-any.whl", hash = "sha256:9572fb63046264a862693b0a87088af3bdc8c068fde03de63453cbbde245465f"},
+    {file = "einops-0.8.0.tar.gz", hash = "sha256:63486517fed345712a8385c100cb279108d9d47e6ae59099b07657e983deae85"},
+]
+
+[[package]]
 name = "etils"
 version = "1.8.0"
 description = "Collection of common python utils"
@@ -3345,4 +3356,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.11,<4.0"
-content-hash = "28dd1162596c32b9cdf9da46ca5dd491ca1f684939dde3ca67f121e82756e916"
+content-hash = "51b5840e0c51c49d081ac75c4aa7395b3697c637cd8a62beba2edd39ef8f1f85"
