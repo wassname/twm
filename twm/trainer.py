@@ -464,7 +464,7 @@ class Trainer:
         eval_env = env_fn()  # create_vector_env(num_envs, env_fn())
 
         seed = (
-            ((config["seed"] + 13) * 7919 + 13) if config["seed"] is not None else None
+            ((config["seed"] + 13) * 79 + 13) if config["seed"] is not None else None
         )
         start_obs, _ = eval_env.reset(seed=seed)
         # add in fake batch and tgt_len dimensions
@@ -511,7 +511,7 @@ class Trainer:
                 current_score = 0
                 finished = False
                 if seed is not None:
-                    seed = seed * 3 + 13 + num_envs
+                    seed = np.in64(seed + 13 + num_envs)
                 start_o, _ = eval_env.reset(seed=seed, options={"force": True})
                 start_o = start_o.unsqueeze(0).unsqueeze(1).to(device)
                 # start_o = preprocess_atari_obs(start_o, device).unsqueeze(1)

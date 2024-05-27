@@ -17,7 +17,7 @@ class ReplayBuffer:
 
         device = config["buffer_device"]
         self.device = torch.device(device)
-        self.prev_seed = (config["seed"] + 1) * 7979
+        self.prev_seed = (config["seed"] + 1) * 79
         initial_obs, _ = env.reset(seed=self.prev_seed)
         initial_obs = torch.as_tensor(np.array(initial_obs), device=device)
         capacity = config["buffer_capacity"]
@@ -162,7 +162,7 @@ class ReplayBuffer:
             # throws away last obs
             seed = self.prev_seed
             if seed is not None:
-                seed = seed * 3 + 13
+                seed = np.int64(seed + 1)
                 self.prev_seed = seed
             next_obs, _ = self.env.reset(seed=seed)
 
