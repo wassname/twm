@@ -31,7 +31,7 @@ CONFIGS['default'] = {
     'env_discount_lambda': 0.95,
 
     # world model
-    'wm_batch_size': 100,
+    'wm_batch_size': 200,
     'wm_sequence_length': 16,
     'wm_train_steps': 1,
     'wm_memory_length': 16,
@@ -74,7 +74,7 @@ CONFIGS['default'] = {
     'dyn_discount_coef': 50,
 
     # actor-critic
-    'ac_batch_size': 400,
+    'ac_batch_size': 800,
     'ac_horizon': 15,
     'ac_act': 'silu',
     'ac_norm': 'none',
