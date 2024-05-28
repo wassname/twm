@@ -3,13 +3,13 @@ CONFIGS = {}
 CONFIGS['default'] = {    
     
     # buffer
-    'buffer_capacity': 100000,
+    'buffer_capacity': 1_000_000_000,
     'buffer_temperature': 20.0,
     'buffer_prefill': 5000,
 
     # training
-    'budget': 1000000000,
-    'pretrain_budget': 20000000,
+    'budget': 1_000_000_000, # 100k in 10hrs. this seems to be wm+ac training steps
+    'pretrain_budget': 20_000_000,
     'pretrain_obs_p': 0.4,
     'pretrain_dyn_p': 0.6,
 
@@ -21,7 +21,7 @@ CONFIGS['default'] = {
     # environment
     'env_frame_size': 8268,
     'env_frame_skip': 1,
-    'env_frame_stack': 4,
+    'env_frame_stack': 2,
     'env_grayscale': True,
     'env_noop_max': 30,
     'env_time_limit': 27000,
@@ -31,7 +31,7 @@ CONFIGS['default'] = {
     'env_discount_lambda': 0.95,
 
     # world model
-    'wm_batch_size': 200,
+    'wm_batch_size': 800,
     'wm_sequence_length': 16,
     'wm_train_steps': 1,
     'wm_memory_length': 16,
@@ -99,4 +99,4 @@ CONFIGS['default'] = {
     'critic_target_interval': 1
 }
 
-CONFIGS['test'] = {**CONFIGS['default'], 'buffer_capacity': 10000, 'buffer_prefill': 5000, 'pretrain_budget': 50000, 'eval_every': 500, 'env_time_limit': 2700 }
+CONFIGS['test'] = {**CONFIGS['default'], 'buffer_capacity': 10_000, 'buffer_prefill': 5000, 'pretrain_budget': 50_000, 'eval_every': 500, 'env_time_limit': 2700 }

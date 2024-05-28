@@ -191,8 +191,9 @@ class Trainer:
         num_batches = budget / budget_per_step
         train_every = (replay_buffer.capacity - config["buffer_prefill"]) / num_batches
 
+        # FIXME this just trains for buffer capacity not train budget?
         step_counter = 0
-        logger.info("collect data in real environment")
+        logger.info(f"collect data in real environment train_every={train_every}, num_batches={num_batches} budget_per_step={budget_per_step}")
         with tqdm(
             total=replay_buffer.capacity - replay_buffer.size,
             unit="step",
@@ -623,21 +624,24 @@ class Trainer:
         o = o[:, :-1, -1:]  # remove last time step and use last frame of frame stack
         a, r, g, weights = [x.cpu().numpy() for x in (a, r, g, weights)]
 
+        # make an imagined image where the rows are the rollout, cols are batch
+        # that means you should look at each col and check for consistency and realism (are trees and coastlines teleporting? are the colors consistent? or is psychadelic?)
+        # note that we fill in some values from the true state, so it's not a perfect representation
         # [b=5, t=17, 1, 8268] -> [5, 17, 130, 110, 3]
-        imagine_img = (
-            craftax_symobs_to_img(o, self.env.unwrapped.env_state)
-            .squeeze(2)
-            # .reshape(-1, 130, 110, 3)
-        )
-        imagine_img = rearrange(imagine_img, 'b t h w c -> (t b) c h w') / 255.0
-        # imagine_img = imagine_img.permute(0, 3, 1, 2)  / 255.0  # channels first
-        # [5*17, 3, 130, 110]
         pad = 2
         extra_pad = 38
+        imagine_img2 = (
+            craftax_symobs_to_img(o, self.env.unwrapped.env_state)
+            .squeeze(2)
+        )
+
+        # FIXME: an attempt
+        imagine_img = rearrange(imagine_img2, 'b t h w c -> (b t) c h w') / 255.0
+        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img3.png')
+        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))).save('imagine_img4.png')
+
+        imagine_img = rearrange(imagine_img2, 'b t h w c -> (t b) c h w') / 255.0
         h, w = imagine_img.shape[-2:]
-        # make an imagined image where the rows are the rollout, cols are batch
-        # that means you should look at each TODO and check for consistency and realism (are trees and coastlines teleporting? are the colors consistent? or is psychadelic?)
-        # note that we fill in some values from the true state, so it's not a perfect representation
 
         # FIXME:
         utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img1.png')
@@ -649,10 +653,20 @@ class Trainer:
         )
         imagine_img = utils.to_image(imagine_img[:, extra_pad:])
 
+        # DELETEME
+        # # r [b=5, t=17]
+        # t,i = r.shape
+        # t-=1
+        # i-=1
+        # y = pad + t * (w + pad)
+        # x = pad + i * (h+extra_pad+pad)+h
+        # print(f'image {np.array(imagine_img).shape}, {x},{y}')
+
+
         # draw action, reward, and discount on the imagined image for each batch
         draw = ImageDraw.Draw(imagine_img)
-        for t in range(r.shape[1]):
-            for i in range(r.shape[0]):
+        for t in range(r.shape[1]): # timestep
+            for i in range(r.shape[0]): # batch
                 x = pad + t * (w + pad)
                 y = pad + i * (h + extra_pad + pad) + h
                 weight = weights[i, t]

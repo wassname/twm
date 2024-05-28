@@ -22,6 +22,10 @@ class ReplayBuffer:
         initial_obs = torch.as_tensor(np.array(initial_obs), device=device)
         capacity = config["buffer_capacity"]
 
+        # could compress like https://gymnasium.farama.org/main/_modules/gymnasium/wrappers/frame_stack/
+        # maybe float16?
+        print('initial_obs', initial_obs, initial_obs.min(), initial_obs.max(), initial_obs.dtype)
+        print(initial_obs[(initial_obs > 0) & (initial_obs < 1)])
         self.obs = torch.zeros(
             (capacity + 1,) + initial_obs.shape, dtype=initial_obs.dtype, device=device
         )

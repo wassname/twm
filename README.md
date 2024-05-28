@@ -1,6 +1,7 @@
 A fork to try
 - [ ] pretrained LLM's vs plain
 - [x] Use craftax environment
+- [ ] 10h for 100k steps
 
 Imagine:
 ![](doc/img/imagine_24_54a2878d2207ca4311e5.png)
