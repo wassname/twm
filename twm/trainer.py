@@ -86,7 +86,7 @@ class Trainer:
         return env
 
     def _create_buffer_obs_policy(self):
-        # actor-critic policy acting on buffer data at index
+        """actor-critic policy acting on buffer data at index."""
         config = self.config
         agent = self.agent
         device = next(agent.parameters()).device
@@ -97,6 +97,9 @@ class Trainer:
 
         @torch.no_grad()
         def policy(index):
+            """
+            Chose a random obs from buffer, and use the dreamer/ac to suggest an action
+            """
             nonlocal dreamer
             if dreamer is None:
                 prefix = config["wm_memory_length"] - 1
@@ -117,6 +120,7 @@ class Trainer:
                 )
 
                 dreamer = Dreamer(config, wm, mode="observe", ac=ac, store_data=False)
+
                 dreamer.observe_reset(
                     start_o, start_a, start_r, start_terminated, start_truncated
                 )
@@ -180,7 +184,7 @@ class Trainer:
         self.summarizer.append(metrics_d)
         wandb.log(self.summarizer.summarize())
 
-        budget = config["budget"] - config["pretrain_budget"]
+        budget = config["train_it_budget"] - config["pretrain_it_budget"]
         budget_per_step = 0
         budget_per_step += (
             config["wm_train_steps"]
@@ -189,71 +193,62 @@ class Trainer:
         )
         budget_per_step += config["ac_batch_size"] * config["ac_horizon"]
         num_batches = budget / budget_per_step
-        train_every = (replay_buffer.capacity - config["buffer_prefill"]) / num_batches
+        env_step_budget_remaining = config['env_step_budget'] - config["buffer_prefill"]
+        train_every = env_step_budget_remaining / num_batches
 
-        # FIXME this just trains for buffer capacity not train budget?
-        step_counter = 0
-        logger.info(f"collect data in real environment train_every={train_every}, num_batches={num_batches} budget_per_step={budget_per_step}")
-        with tqdm(
-            total=replay_buffer.capacity - replay_buffer.size,
-            unit="step",
-            desc="train",
-            mininterval=mininterval,
-        ) as pbar:
-            while replay_buffer.size < replay_buffer.capacity:
-                collect_policy = self._create_buffer_obs_policy()
-                should_log = False
-                # logger.debug(f"step:0 collect {train_every} data")
-                while (
-                    step_counter <= train_every
-                    and replay_buffer.size < replay_buffer.capacity
-                ):
-                    if replay_buffer.size - self.last_eval >= config["eval_every"]:
-                        metrics_d = self._evaluate(is_final=False)
-                        metrics.update_metrics(
-                            metrics_d, replay_buffer.metrics(), prefix="buffer/"
-                        )
-                        self.summarizer.append(metrics_d)
-                        wandb.log(self.summarizer.summarize())
+        collect_policy = self._create_buffer_obs_policy()
+        for i in tqdm(range(env_step_budget_remaining), desc='training', mininterval=mininterval):
+            replay_buffer.step(collect_policy)
 
-                    replay_buffer.step(collect_policy)
-                    step_counter += 1
-                    pbar.update(1)
-
-                    if replay_buffer.size % log_every == 0:
-                        should_log = True
-                # logger.debug(f"step:1")
-
-                # train world model and actor-critic
-                # logger.debug(f"train:0 train world model and actor-critic")
-                metrics_hist = []
-                while step_counter >= train_every:
-                    step_counter -= train_every
-                    metrics_d = self._train_step()
-                    metrics_hist.append(metrics_d)
-                # logger.debug(f"train:1")
-
-                metrics_d = metrics.mean_metrics(metrics_hist)
-                metrics.update_metrics(
-                    metrics_d, replay_buffer.metrics(), prefix="buffer/"
-                )
-                # logger.debug(f"eval:0 evaluate")
-
-                # evaluate
-                if (
-                    replay_buffer.size - self.last_eval >= config["eval_every"]
-                    and replay_buffer.size < replay_buffer.capacity
-                ):
-                    eval_metrics = self._evaluate(is_final=False)
-                    metrics_d.update(eval_metrics)
-                    should_log = True
-                # logger.debug(f"eval:1")
-
+            if i % train_every == 0:
+                metrics_d = self._train_step()
                 self.summarizer.append(metrics_d)
-                if should_log:
-                    s = self.summarizer.summarize()
-                    wandb.log(s)
-                    logger.debug(s)
+
+            if i % config["eval_every"] == 0:
+                eval_metrics = self._evaluate(is_final=False)
+                self.summarizer.append(eval_metrics)
+
+            if i % log_every == 0:
+                wandb.log(self.summarizer.summarize())
+
+        # # FIXME this just trains for buffer capacity not train budget?
+        # env_step_counter = 0
+        # train_step_counter = 0
+        # logger.info(f"collect data in real environment train_every={train_every}, num_batches={num_batches} budget_per_step={budget_per_step}")
+
+        # with tqdm(
+        #     total=env_step_budget_remaining,
+        #     unit="step",
+        #     desc="train",
+        #     mininterval=mininterval,
+        # ) as pbar:
+        #     while env_step_counter < env_step_budget_remaining:
+        #         collect_policy = self._create_buffer_obs_policy()
+        #         for i in range(env_step_counter):
+        #             if env_step_counter < config['env_step_budget']:
+        #                 # FIXME: wait is this the same act each time?
+        #                 replay_buffer.step(collect_policy)
+        #                 env_step_counter += 1
+        #                 pbar.update(1)
+
+        #         # train world model and actor-critic
+        #         metrics_d = self._train_step()
+        #         train_step_counter += 1
+
+        #         metrics.update_metrics(
+        #             metrics_d, replay_buffer.metrics(), prefix="buffer/"
+        #         )
+
+        #         # evaluate
+        #         if train_step_counter % config["eval_every"] == 0:
+        #             eval_metrics = self._evaluate(is_final=False)
+        #             metrics_d.update(eval_metrics)
+
+        #         self.summarizer.append(metrics_d)
+        #         if train_step_counter % config["log_every"] == 0:
+        #             s = self.summarizer.summarize()
+        #             wandb.log(s)
+        #             logger.debug(s)
                 
 
         logger.info("final evaluation")
@@ -281,7 +276,7 @@ class Trainer:
 
         logger.info("pretrain observation model")
         wm_total_batch_size = config["wm_batch_size"] * config["wm_sequence_length"]
-        budget = config["pretrain_budget"] * config["pretrain_obs_p"]
+        budget = config["pretrain_it_budget"] * config["pretrain_obs_p"]
         with tqdm(total=int(budget), mininterval=mininterval) as pbar:
             while budget > 0:
                 indices = torch.randperm(
@@ -307,7 +302,7 @@ class Trainer:
             z_dist = obs_model.eval().encode(o)
 
         logger.info("pretrain dynamics model")
-        budget = config["pretrain_budget"] * config["pretrain_dyn_p"]
+        budget = config["pretrain_it_budget"] * config["pretrain_dyn_p"]
         with tqdm(total=int(budget), mininterval=mininterval) as pbar:
             while budget > 0:
                 for idx in replay_buffer.generate_uniform_indices(
@@ -334,7 +329,7 @@ class Trainer:
                         break
 
         logger.info("pretrain ac")
-        budget = config["pretrain_budget"] * (
+        budget = config["pretrain_it_budget"] * (
             1 - config["pretrain_obs_p"] + config["pretrain_dyn_p"]
         )
         with tqdm(total=budget * 1, mininterval=mininterval) as pbar:

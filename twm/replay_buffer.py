@@ -7,7 +7,6 @@ import torch.nn.functional as F
 import torch.distributions as D
 from twm.custom_types import Obs
 from twm import utils, metrics
-# from twm.envs.atari import create_reward_transform, preprocess_atari_obs
 
 
 class ReplayBuffer:
@@ -41,7 +40,8 @@ class ReplayBuffer:
         )  # we sample indices on cpu
 
         self.capacity = capacity
-        self.size = 0
+        self.size = 0 # number of elements in the buffer
+        self.index = 0 # index of the next element to be added 
         self.total_reward = 0
         self.score = 0
         self.episode_lengths = []
@@ -156,7 +156,7 @@ class ReplayBuffer:
 
     def step(self, policy_fn):
         config = self.config
-        index = self.size
+        index = self.index
         if index >= config["buffer_capacity"]:
             raise ValueError("Buffer overflow")
 
@@ -179,7 +179,10 @@ class ReplayBuffer:
             0 if (terminated or truncated) else (self.timesteps[index] + 1)
         )
 
-        self.size = index + 1
+        # max when full
+        self.size = min(self.size + 1, config["buffer_capacity"])
+        # Wrap around when full
+        self.index = (index + 1) % config["buffer_capacity"]
         self.total_reward += reward
         self.score += reward
         if terminated or truncated:
