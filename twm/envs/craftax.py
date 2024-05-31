@@ -16,6 +16,9 @@ from craftax.craftax.renderer import (
 from craftax.craftax.constants import Action
 from craftax.craftax.craftax_state import EnvState
 import gymnasium
+from gymnasium.wrappers.jax_to_numpy import numpy_to_jax, jax_to_numpy
+from gymnasium.wrappers.jax_to_torch import jax_to_torch, torch_to_jax
+from gymnasium.wrappers.numpy_to_torch import numpy_to_torch, torch_to_numpy
 from gymnasium.wrappers import FrameStackObservation, TimeLimit, JaxToTorch
 import gymnasium.spaces as gym_spaces
 from twm.envs.gymnax2gymnasium import GymnaxToGymWrapper, GymnaxToVectorGymWrapper
@@ -40,18 +43,20 @@ def permute_env(env, prm=[1, 0, 2]):
     env = TransformObservation(env, lambda x: jnp.transpose(x, prm), obs_space=new_os)
     return env
 
+def to_torch(v) -> torch.Tensor:
+    if isinstance(v, jnp.ndarray):
+        if v.dtype=='bool':
+            # bool doesn't convert using the jax_to_torch dlpack
+            # return torch.from_numpy(v._npy_value.copy())
+            return torch.as_tensor(v.tolist())
+        return jax_to_torch(v)
+    if isinstance(v, np.ndarray):
+        return numpy_to_torch(v)
+    if isinstance(v, torch.Tensor):
+        return v
+    else:
+        return torch.as_tensor(v)
 
-def from_jax(t):
-    return torch.as_tensor(t.tolist())
-
-
-# class PermuteObsWrapper(gym.ObservationWrapper):
-#     def __init__(self, env, permute_dims):
-#         super().__init__(env)
-
-#     def observation(self, obs):
-#         obs = obs.permute(*self.permute_dims)
-#         return obs
 
 
 class CraftaxCompatWrapper(gymnasium.core.Wrapper):
@@ -69,19 +74,16 @@ class CraftaxCompatWrapper(gymnasium.core.Wrapper):
     ) -> Tuple[Float[Tensor, "frames odim"], float, bool, bool, Dict]:
         next_obs, reward, terminated, truncated, info = self.env.step(action)
         return (
-            from_jax(next_obs),
-            from_jax(reward),
-            from_jax(terminated),
-            from_jax(truncated),
+            numpy_to_torch(next_obs).to(torch.float16), # in symbolic only lighting needs values other than 0 and 1
+            to_torch(reward),
+            to_torch(terminated),
+            to_torch(truncated),
             info,
         )
 
     def reset(self, *args, **kwargs):
-        # if 'seed' in kwargs:
-        #     kwargs['rng'] = jax.random.PRNGKey(int(kwargs['seed']))
-        #     del kwargs['seed']
         obs, state = self.env.reset(*args, **kwargs)
-        return from_jax(obs), state
+        return numpy_to_torch(obs), state
 
     def get_action_meanings(self) -> Dict[int, str]:
         return {i.value: s for s, i in Action.__members__.items()}
@@ -89,32 +91,6 @@ class CraftaxCompatWrapper(gymnasium.core.Wrapper):
     @property
     def env_state(self):
         return self.env.unwrapped.env_state
-
-    # # provide proxy access to regular attributes of wrapped object
-    # def __getattr__(self, name):
-    #     print('gettattr', name)
-    #     try:
-    #         return getattr(self, name)
-    #     except AttributeError:
-    #         raise
-    #         pass
-    #     try:
-    #         return getattr(self.env, name)
-    #     except AttributeError:
-    #         pass
-    #     try:
-    #         return getattr(self._env, name)
-    #     except AttributeError:
-    #         pass
-    #     try:
-    #         return getattr(self.unwrapped, name)
-    #     except AttributeError:
-    #         pass
-    #     try:
-    #         return getattr(self.unwrapped._env, name)
-    #     except AttributeError:
-    #         pass
-    #     raise AttributeError(f"AttributeError: {name}")
 
 
 class CraftaxRenderWrapper(gymnasium.core.Wrapper):
@@ -171,8 +147,7 @@ def create_craftax_env(
     """
     game = "Craftax-Symbolic-v1"
     # see https://github.dev/MichaelTMatthews/Craftax_Baselines/blob/main/ppo_rnn.py
-    # env = make_craftax_env_from_name(game, auto_reset=eval)
-    env = make_craftax_env_from_name(game, auto_reset=True)
+    env = make_craftax_env_from_name(game, auto_reset=not eval)
     if num_envs > 1:
         # FIXME: naive optimistic resets don't work well with multiple envs see OptimisticResetVecEnvWrapper
         env = GymnaxToVectorGymWrapper(env, seed=seed, num_envs=num_envs)
@@ -181,8 +156,6 @@ def create_craftax_env(
         env = GymnaxToGymWrapper(env, env.default_params, seed=seed)
     # env = LogWrapper(env)
 
-    # env = JaxToTorch(env)
-
     # We have to vectorise using jax earlier as there is not framestack wrapepr avaiable for jax
     # but then the framestack dim is before the env dim [framestack, batch, obs_dim] so lets swap those
     env = FrameStackObservation(env, frame_stack)
@@ -190,8 +163,8 @@ def create_craftax_env(
         env = permute_env(env, [1, 0, 2])
 
     # env.unwrapped.spec = gym.spec(game) # required for AtariPreprocessing
-    # FIXME: should this be here for eval?
-    env = TimeLimit(env, max_episode_steps=time_limit)
+    if not eval:
+        env = TimeLimit(env, max_episode_steps=time_limit)
 
     env = CraftaxRenderWrapper(env, render_method=None)
     env = CraftaxCompatWrapper(env)

@@ -195,6 +195,7 @@ class Trainer:
         num_batches = budget / budget_per_step
         env_step_budget_remaining = config['env_step_budget'] - config["buffer_prefill"]
         train_every = env_step_budget_remaining / num_batches
+        logger.info(f"train_every={train_every}, eval_every={config['eval_every']}, num_batches={num_batches}, budget_per_step={budget_per_step}")
 
         collect_policy = self._create_buffer_obs_policy()
         for i in tqdm(range(env_step_budget_remaining), desc='training', mininterval=mininterval):

@@ -155,9 +155,9 @@ class DreamEnv(gym.Env):
         array = self.render_frame_stack(o)
         array = np.clip(array, 0, 1)
 
-        if config["env_grayscale"]:
-            array = array[:, :, np.newaxis]
-            array = np.repeat(array, 3, axis=2)
+        # if config["env_grayscale"]:
+        array = array[:, :, np.newaxis]
+        array = np.repeat(array, 3, axis=2)
 
         obs_h, obs_w = array.shape[:2]
 
@@ -407,6 +407,7 @@ def play_real(config, state_dict, device, user_input, seed):
     keys_to_action = env.get_keys_to_action()
     env = RenderWrapper(env, zoom, fps, keys_to_action)
     render_wrapper = env
+    # FIXME no atari
     env = gym.wrappers.AtariPreprocessing(
         env,
         noop_max=0,

@@ -203,7 +203,7 @@ class ObservationModel(nn.Module):
         )
 
         # no norm here
-        frames = 4
+        frames = config['env_frame_stack']
         self.decoder = nn.Sequential(
             nets.MLP(
                 self.z_dim,
@@ -289,13 +289,13 @@ class ObservationModel(nn.Module):
         return self.sample_z(z_dist, reparameterized, temperature, idx, return_logits)
 
     def decode(self, z: Z) -> Obs:
-        config = self.config
+        # config = self.config
         shape = z.shape[:2]
         z = z.flatten(0, 1)
         recons = self.decoder(z)
-        if not config["env_grayscale"]:
-            recons = recons.unflatten(1, (config["env_frame_stack"], 3))
-            recons = recons.permute(0, 1, 3, 4, 2)
+        # if not config["env_grayscale"]:
+        #     recons = recons.unflatten(1, (config["env_frame_stack"], 3))
+        #     recons = recons.permute(0, 1, 3, 4, 2)
         recons = recons.unflatten(0, shape)
 
         return recons
