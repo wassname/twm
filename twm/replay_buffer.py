@@ -18,13 +18,9 @@ class ReplayBuffer:
         self.device = torch.device(device)
         self.prev_seed = (config["seed"] + 1) * 79
         initial_obs, _ = env.reset(seed=self.prev_seed)
-        initial_obs = torch.as_tensor(np.array(initial_obs), device=device)
+        initial_obs = torch.as_tensor(np.array(initial_obs), device=device).to(torch.float16)
         capacity = config["buffer_capacity"]
 
-        # could compress like https://gymnasium.farama.org/main/_modules/gymnasium/wrappers/frame_stack/
-        # maybe float16?
-        print('initial_obs', initial_obs, initial_obs.min(), initial_obs.max(), initial_obs.dtype)
-        print(initial_obs[(initial_obs > 0) & (initial_obs < 1)])
         self.obs = torch.zeros(
             (capacity + 1,) + initial_obs.shape, dtype=initial_obs.dtype, device=device
         )
@@ -73,9 +69,11 @@ class ReplayBuffer:
         if isinstance(idx, (tuple, list, np.ndarray)):
             idx = torch.as_tensor(idx, device=self.device)
 
+        idx = torch.where(idx < 0, self.size + idx, idx)
         assert torch.is_tensor(idx)
-        assert torch.all(idx >= 0)
         assert torch.all((idx <= self.size) if allow_last else (idx < self.size))
+        assert torch.all(idx >= 0)
+
 
         if idx.ndim == 1:
             idx = idx.unsqueeze(0)
@@ -128,7 +126,7 @@ class ReplayBuffer:
     def get_obs(self, idx, device=None, prefix=0, return_next=False) -> Obs:
         return self._get(
             self.obs, idx, device, prefix, return_next=return_next, allow_last=True
-        )
+        ).to(torch.float)
 
     def get_actions(self, idx, device=None, prefix=0):
         return self._get(self.actions, idx, device, prefix, repeat_fill_value=0)  # noop
@@ -183,6 +181,7 @@ class ReplayBuffer:
         self.size = min(self.size + 1, config["buffer_capacity"])
         # Wrap around when full
         self.index = (index + 1) % config["buffer_capacity"]
+        
         self.total_reward += reward
         self.score += reward
         if terminated or truncated:
@@ -209,7 +208,7 @@ class ReplayBuffer:
         n = self.size - sequence_length + 1
         batch_size = max_batch_size
         if batch_size * sequence_length > n:
-            raise ValueError("Not enough data in buffer")
+            raise ValueError(f"Not enough data in buffer_prefill. Needs {batch_size * sequence_length}, have {n}")
 
         probs = self._compute_visit_probs(n)
         start_idx = torch.multinomial(probs, batch_size, replacement=False)

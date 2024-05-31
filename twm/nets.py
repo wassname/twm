@@ -707,6 +707,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("encodings", encodings)
 
     def forward(self, positions):
+        assert max(positions)<=self.max_length
         out = self.encodings[positions]
         out = self.dropout(out)
         return out.unsqueeze(0) if self.batch_first else out.unsqueeze(1)

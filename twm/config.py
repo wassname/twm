@@ -2,39 +2,45 @@ CONFIGS = {}
 
 CONFIGS["default"] = {
     # buffer
-    "buffer_capacity": 100_000_000,
+    "buffer_capacity": 200_000, # 200k, ~8GB
     "buffer_temperature": 20.0,
-    "buffer_prefill": 5000,
+    "buffer_prefill": 20_000, # need to be proportional to batch size
+
     # training
-    "train_it_budget": 1_000_000_000,  # 100k in 10hrs. this seems to be wm+ac training steps
+    "train_it_budget": 1_000_000,  # 100k in 10hrs. this seems to be wm+ac training steps. was 1_000_000_000
     "pretrain_it_budget": 20_000_000,
     "pretrain_obs_p": 0.4,
     "pretrain_dyn_p": 0.6,
+
     # evaluation
-    "eval_every": 5000,
+    "eval_every": 25000,
     "eval_episodes": 10,
     "final_eval_episodes": 100,
+
     # environment
-    "env_step_budget": 1_000_000_000, # TODO use
-    "env_frame_size": 8268,
-    "env_frame_skip": 1,
+    "env_step_budget": 1_000_000, #  was 100k for breakout, 1M or 1B for crafter
+    "env_frame_size": 8268, # craftax
+    "env_frame_skip": 1, # REMOVE
     "env_frame_stack": 2,
-    "env_grayscale": True,
-    "env_noop_max": 30,
-    "env_time_limit": 27000,
-    "env_episodic_lives": True,
-    "env_reward_transform": "tanh",
+    "env_grayscale": True, # REMOVE
+    "env_noop_max": 30, # REMOVE
+    "env_time_limit": 10_000, # only during training
+    "env_episodic_lives": True, # REMOVE
+    "env_reward_transform": "tanh", # REMOVE
     "env_discount_factor": 0.99,
     "env_discount_lambda": 0.95,
+
     # world model
     "wm_batch_size": 800,
     "wm_sequence_length": 16,
     "wm_train_steps": 1,
     "wm_memory_length": 16,
     "wm_discount_threshold": 0.1,
+
     "z_categoricals": 32,
     "z_categories": 32,
-    "obs_channels": 48,
+
+    # "obs_channels": 48,
     "obs_act": "silu",
     "obs_norm": "none",
     "obs_dropout": 0,
@@ -46,6 +52,7 @@ CONFIGS["default"] = {
     "obs_entropy_threshold": 0.1,
     "obs_consistency_coef": 0.01,
     "obs_decoder_coef": 1,
+
     "dyn_embed_dim": 256,
     "dyn_num_heads": 4,
     "dyn_num_layers": 10,
@@ -66,6 +73,7 @@ CONFIGS["default"] = {
     "dyn_z_coef": 1,
     "dyn_reward_coef": 10,
     "dyn_discount_coef": 50,
+
     # actor-critic
     "ac_batch_size": 800,
     "ac_horizon": 15,
@@ -82,6 +90,7 @@ CONFIGS["default"] = {
     "actor_entropy_coef": 1e-2,
     "actor_entropy_threshold": 0.1,
     "actor_grad_clip": 1,
+
     "critic_dims": [512, 512, 512, 512],
     "critic_lr": 1e-5,
     "critic_eps": 1e-5,
@@ -92,13 +101,15 @@ CONFIGS["default"] = {
 
 CONFIGS["test"] = {
     **CONFIGS["default"],
-    "buffer_capacity": 3_000,
-    "buffer_prefill": 1000,
-    "train_it_budget": 10_000,
+    # smallest possible run that will test batch size, train, eval, and buffer wrap around
+    "buffer_capacity": 15_000,
+    "buffer_prefill": 13_000,
+    "train_it_budget": 50_000,
     "pretrain_it_budget": 5_000,
-    "eval_every": 500,
-    "env_time_limit": 270,
-    "wm_batch_size": 8,
-    "ac_batch_size": 8,
-    "wm_sequence_length": 8,
+    "eval_every": 25000,
+    "env_time_limit": 1870,
+    # "wm_batch_size": 8,
+    # "ac_batch_size": 8,
+    # "wm_sequence_length": 8,
+    "env_step_budget": 73_000,
 }

@@ -12,13 +12,10 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "autoReload": {"enable": true,},
-            "pythonArgs": ["-Xfrozen_modules=off"],
             "env": {"WANDB_MODE":"disabled","WANDB_SILENT":"true", "TQDM_MININTERVAL": "5"},
             "args": [
-                "--game=Craftax-Symbolic-AutoReset-v1",
-                // "--game=Breakout",
                 "--config=test",
-                "--buffer_device=cpu",
+                // "--device=cpu",
             ]
         },
         {
@@ -32,8 +29,6 @@
             "env": {"TQDM_MININTERVAL": "30"},
             "args": [
                 "--wandb=online",
-                // "--game=Craftax-Symbolic-AutoReset-v1",
-                // "--game=Breakout",
             ]
         }
     ]

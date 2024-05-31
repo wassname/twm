@@ -180,7 +180,7 @@ class ObservationModel(nn.Module):
         self.config = config
         self.z_dim = config["z_categoricals"] * config["z_categories"]
 
-        h = config["obs_channels"]
+        # h = config["obs_channels"]
         activation = config["obs_act"]
         norm = config["obs_norm"]
         dropout_p = config["obs_dropout"]
@@ -375,7 +375,7 @@ class DynamicsModel(nn.Module):
             "a": {"in_dim": num_actions, "categorical": True},
         }
         modality_order = ["z", "a"]
-        num_current = 2
+        num_current = 2 # FIXME: what's this?
 
         if config["dyn_input_rewards"]:
             embeds["r"] = {"in_dim": 0, "categorical": False}

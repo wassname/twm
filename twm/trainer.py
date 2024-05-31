@@ -1,4 +1,4 @@
-import multiprocessing
+# import multiprocessing
 import os
 import time
 
@@ -18,9 +18,10 @@ from twm.envs.craftax import (
     create_vector_env,
     NoAutoReset,
 )
+import pandas as pd
 from einops import rearrange, repeat, reduce
 
-mininterval = 30
+mininterval = 5
 logger.remove()
 logger.add(lambda msg: tqdm.write(msg, end=""), colorize=True)
 
@@ -54,17 +55,17 @@ class Trainer:
         wm = agent.wm
         ac = agent.ac
         print("# Parameters")
-        print("Observation model:", count_params(wm.obs_model))
-        print("Dynamics model:", count_params(wm.dyn_model))
-        print("Actor:", count_params(ac.actor_model))
-        print("Critic:", count_params(ac.critic_model))
-        print("World model:", count_params(wm))
-        print("Actor-critic:", count_params(ac))
-        print(
-            "Observation encoder + actor:",
-            count_params(wm.obs_model.encoder) + count_params(ac.actor_model),
-        )
-        print("Total:", count_params(agent))
+        df = pd.DataFrame({
+                            'wm (World Model)': [count_params(wm)],
+                            'wm.obs_model': [count_params(wm.obs_model)],
+                            'wm.dynamics_model': [count_params(wm.dyn_model)],
+                            'ac (Actor-critic)': [count_params(ac)],
+                            'ac.Actor': [count_params(ac.actor_model)],
+                            'ac.Critic': [count_params(ac.critic_model)],
+                            'wm.obs_model.encoder + ac.actor_model': [count_params(wm.obs_model.encoder) + count_params(ac.actor_model)],
+                            'Total': [count_params(agent)]}).T*1.0
+        pd.set_eng_float_format(accuracy=1, use_eng_prefix=True)
+        print(df)
 
     def close(self):
         self.env.close()
@@ -184,30 +185,34 @@ class Trainer:
         self.summarizer.append(metrics_d)
         wandb.log(self.summarizer.summarize())
 
-        budget = config["train_it_budget"] - config["pretrain_it_budget"]
-        budget_per_step = 0
-        budget_per_step += (
+        samples_left_for_training = config["train_it_budget"] - config["pretrain_it_budget"]
+        samples_per_train_step = 0
+        samples_per_train_step += (
             config["wm_train_steps"]
             * config["wm_batch_size"]
             * config["wm_sequence_length"]
         )
-        budget_per_step += config["ac_batch_size"] * config["ac_horizon"]
-        num_batches = budget / budget_per_step
+        samples_per_train_step += config["ac_batch_size"] * config["ac_horizon"]
+        train_steps = samples_left_for_training // samples_per_train_step
         env_step_budget_remaining = config['env_step_budget'] - config["buffer_prefill"]
-        train_every = env_step_budget_remaining / num_batches
-        logger.info(f"train_every={train_every}, eval_every={config['eval_every']}, num_batches={num_batches}, budget_per_step={budget_per_step}")
+        train_every = env_step_budget_remaining // train_steps
+        logger.info(f"train_it_every_n_steps={train_every}, eval_every_n_steps={config['eval_every']}, num_train_batches={train_steps}, opt_budget_per_step={samples_per_train_step}")
 
         collect_policy = self._create_buffer_obs_policy()
         for i in tqdm(range(env_step_budget_remaining), desc='training', mininterval=mininterval):
             replay_buffer.step(collect_policy)
 
             if i % train_every == 0:
+                # logger.debug("train:0")
                 metrics_d = self._train_step()
                 self.summarizer.append(metrics_d)
+                # logger.info("train:0")
 
             if i % config["eval_every"] == 0:
+                # logger.info("evaluation:0")
                 eval_metrics = self._evaluate(is_final=False)
                 self.summarizer.append(eval_metrics)
+                # logger.info("evaluation:1")
 
             if i % log_every == 0:
                 wandb.log(self.summarizer.summarize())
@@ -333,6 +338,7 @@ class Trainer:
         budget = config["pretrain_it_budget"] * (
             1 - config["pretrain_obs_p"] + config["pretrain_dyn_p"]
         )
+        # TODO can this be a for loop?
         with tqdm(total=budget * 1, mininterval=mininterval) as pbar:
             while budget > 0:
                 for idx in replay_buffer.generate_uniform_indices(
@@ -434,6 +440,7 @@ class Trainer:
         config = self.config
         agent = self.agent
         device = next(agent.parameters()).device
+        dtype = next(agent.parameters()).dtype
         wm = agent.wm
         ac = agent.ac
         replay_buffer = self.replay_buffer
@@ -451,9 +458,9 @@ class Trainer:
         num_episodes = (
             config["final_eval_episodes"] if is_final else config["eval_episodes"]
         )
-        num_envs = max(
-            min(num_episodes, int(multiprocessing.cpu_count() * config["cpu_p"])), 1
-        )
+        # num_envs = max(
+        #     min(num_episodes, int(multiprocessing.cpu_count() * config["cpu_p"])), 1
+        # )
         # logger.debug(f'num_envs: {num_envs}')
         env_fn = lambda: Trainer._create_env_from_config(config, eval=True)
 
@@ -485,7 +492,7 @@ class Trainer:
             finished = truncated | terminated
 
             # o = preprocess_atari_obs(o, device)
-            o = o.unsqueeze(0).unsqueeze(1).to(device)
+            o = o.unsqueeze(0).unsqueeze(1).to(device).to(torch.float)
             r = (
                 torch.as_tensor(r, dtype=torch.float, device=device)
                 .unsqueeze(0)

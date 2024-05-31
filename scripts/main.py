@@ -58,6 +58,7 @@ def main(args=None):
         'game': args.game, 'seed': args.seed, 'model_device': args.device, 'buffer_device': buffer_device,
         'cpu_p': args.cpu_p, 'save': args.save
     })
+    print('CONFIG', args.config, config)
 
     wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb)
     config = dict(wandb.config)
