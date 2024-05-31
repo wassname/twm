@@ -34,7 +34,8 @@ class Trainer:
             raise ValueError()
 
         self.config = config
-        self.env = self._create_env_from_config(config)
+        self.env = self._create_env_from_config(config, eval=False)
+        self.eval_env = self._create_env_from_config(config, eval=True)
         self.replay_buffer = ReplayBuffer(config, self.env)
 
         num_actions = self.env.action_space.n
@@ -72,18 +73,16 @@ class Trainer:
 
     @staticmethod
     def _create_env_from_config(config, eval=False):
-        # env = create_atari_env(
-        #     config['game'], noop_max, config['env_frame_skip'], config['env_frame_stack'],
-        #     config['env_frame_size'], config['env_episodic_lives'], config['env_grayscale'], config['env_time_limit'])
+
         env = create_craftax_env(
             config["game"],
             frame_stack=config["env_frame_stack"],
             time_limit=config["env_time_limit"],
             eval=eval,
         )
-        if eval:
-            # FIXME: make it work for crafter
-            env = NoAutoReset(env)  # must use options={'force': True} to really reset
+        # if eval:
+        #     # FIXME: make it work for crafter
+        #     env = NoAutoReset(env)  # must use options={'force': True} to really reset
         return env
 
     def _create_buffer_obs_policy(self):
@@ -203,58 +202,19 @@ class Trainer:
             replay_buffer.step(collect_policy)
 
             if i % train_every == 0:
-                # logger.debug("train:0")
                 metrics_d = self._train_step()
                 self.summarizer.append(metrics_d)
-                # logger.info("train:0")
 
             if i % config["eval_every"] == 0:
-                # logger.info("evaluation:0")
                 eval_metrics = self._evaluate(is_final=False)
                 self.summarizer.append(eval_metrics)
-                # logger.info("evaluation:1")
+
+            if config["save"] and (i % config["save_every"] == 0)
+                filename = f"agent_{i}}.pt"
+                self.save(filename)
 
             if i % log_every == 0:
                 wandb.log(self.summarizer.summarize())
-
-        # # FIXME this just trains for buffer capacity not train budget?
-        # env_step_counter = 0
-        # train_step_counter = 0
-        # logger.info(f"collect data in real environment train_every={train_every}, num_batches={num_batches} budget_per_step={budget_per_step}")
-
-        # with tqdm(
-        #     total=env_step_budget_remaining,
-        #     unit="step",
-        #     desc="train",
-        #     mininterval=mininterval,
-        # ) as pbar:
-        #     while env_step_counter < env_step_budget_remaining:
-        #         collect_policy = self._create_buffer_obs_policy()
-        #         for i in range(env_step_counter):
-        #             if env_step_counter < config['env_step_budget']:
-        #                 # FIXME: wait is this the same act each time?
-        #                 replay_buffer.step(collect_policy)
-        #                 env_step_counter += 1
-        #                 pbar.update(1)
-
-        #         # train world model and actor-critic
-        #         metrics_d = self._train_step()
-        #         train_step_counter += 1
-
-        #         metrics.update_metrics(
-        #             metrics_d, replay_buffer.metrics(), prefix="buffer/"
-        #         )
-
-        #         # evaluate
-        #         if train_step_counter % config["eval_every"] == 0:
-        #             eval_metrics = self._evaluate(is_final=False)
-        #             metrics_d.update(eval_metrics)
-
-        #         self.summarizer.append(metrics_d)
-        #         if train_step_counter % config["log_every"] == 0:
-        #             s = self.summarizer.summarize()
-        #             wandb.log(s)
-        #             logger.debug(s)
                 
 
         logger.info("final evaluation")
@@ -266,10 +226,13 @@ class Trainer:
 
         # save final model
         if config["save"]:
-            filename = "agent_final.pt"
-            checkpoint = {"config": dict(config), "state_dict": self.agent.state_dict()}
-            torch.save(checkpoint, os.path.join(wandb.run.dir, filename))
-            wandb.save(filename)
+            self.save("agent_final.pt")
+
+    def save(self, filename):
+        checkpoint = {"config": dict(self.config), "state_dict": self.agent.state_dict()}
+        torch.save(checkpoint, filename)
+        wandb.save(filename)
+        logger.info(f"saved checkpoint to {filename}")
 
     def _pretrain(self):
         config = self.config
@@ -458,15 +421,8 @@ class Trainer:
         num_episodes = (
             config["final_eval_episodes"] if is_final else config["eval_episodes"]
         )
-        # num_envs = max(
-        #     min(num_episodes, int(multiprocessing.cpu_count() * config["cpu_p"])), 1
-        # )
-        # logger.debug(f'num_envs: {num_envs}')
-        env_fn = lambda: Trainer._create_env_from_config(config, eval=True)
-
-        # FIXME: this multiproc wont work with craftax jax
-        num_envs = 1  # FIXME
-        eval_env = env_fn()  # create_vector_env(num_envs, env_fn())
+        num_envs = 1
+        eval_env = self.eval_env
 
         seed = (
             ((config["seed"] + 13) * 79 + 13) if config["seed"] is not None else None
@@ -491,7 +447,6 @@ class Trainer:
             current_score += r
             finished = truncated | terminated
 
-            # o = preprocess_atari_obs(o, device)
             o = o.unsqueeze(0).unsqueeze(1).to(device).to(torch.float)
             r = (
                 torch.as_tensor(r, dtype=torch.float, device=device)
@@ -522,7 +477,7 @@ class Trainer:
                 # start_o = preprocess_atari_obs(start_o, device).unsqueeze(1)
                 dreamer = Dreamer(config, wm, mode="observe", ac=ac, store_data=False)
                 dreamer.observe_reset_single(start_o)
-        eval_env.close()
+        # eval_env.close()
         if num_truncated > 0:
             print(f"{num_truncated} episode(s) truncated")
 
@@ -583,7 +538,6 @@ class Trainer:
 
         # FIXME:
         utils.to_image(torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)).save('recon_img1.png')
-        utils.to_image(torchvision.utils.make_grid(recon_img, nrow=o.shape[1], padding=2)).save('recon_img2.png')
 
         recon_img = torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)
         recon_img = utils.to_image(recon_img)
@@ -639,21 +593,21 @@ class Trainer:
         )
 
         # FIXME: an attempt
-        imagine_img = rearrange(imagine_img2, 'b t h w c -> (b t) c h w') / 255.0
-        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img3.png')
-        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))).save('imagine_img4.png')
+        # imagine_img = rearrange(imagine_img2, 'b t h w c -> (b t) c h w') / 255.0
+        # utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img3.png')
+        # utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))).save('imagine_img4.png')
 
         imagine_img = rearrange(imagine_img2, 'b t h w c -> (t b) c h w') / 255.0
         h, w = imagine_img.shape[-2:]
 
-        # FIXME:
-        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img1.png')
+        # FIXME: actually 2 makes more sense after training
+        # utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img1.png')
         utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))).save('imagine_img2.png')
 
 
-        imagine_img = utils.make_grid(
-            imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad)
-        )
+        # imagine_img = utils.make_grid(
+        #     imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad)
+        # )
         imagine_img = utils.to_image(imagine_img[:, extra_pad:])
 
         # DELETEME

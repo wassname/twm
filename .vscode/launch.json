@@ -29,6 +29,7 @@
             "env": {"TQDM_MININTERVAL": "30"},
             "args": [
                 "--wandb=online",
+                "--save",
             ]
         }
     ]

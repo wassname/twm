@@ -2,7 +2,7 @@
 
 main:
     . .venv/bin/activate
-    TQDM_MININTERVAL=30 python -O scripts/main.py --wandb=online
+    TQDM_MININTERVAL=30 python -O scripts/main.py --wandb=online --save
 
 test:
     . .venv/bin/activate

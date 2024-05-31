@@ -7,12 +7,13 @@ CONFIGS["default"] = {
     "buffer_prefill": 20_000, # need to be proportional to batch size
 
     # training
-    "train_it_budget": 1_000_000,  # 100k in 10hrs. this seems to be wm+ac training steps. was 1_000_000_000
+    "train_it_budget": 3_000_000,  # 100k in 10hrs. this seems to be wm+ac training steps. was 1_000_000_000. # 3h, and b=800, 1M
     "pretrain_it_budget": 20_000_000,
     "pretrain_obs_p": 0.4,
     "pretrain_dyn_p": 0.6,
 
     # evaluation
+    "save_every": 100_000,
     "eval_every": 25000,
     "eval_episodes": 10,
     "final_eval_episodes": 100,
@@ -20,25 +21,25 @@ CONFIGS["default"] = {
     # environment
     "env_step_budget": 1_000_000, #  was 100k for breakout, 1M or 1B for crafter
     "env_frame_size": 8268, # craftax
-    "env_frame_skip": 1, # REMOVE
+    # "env_frame_skip": 1, # REMOVE
     "env_frame_stack": 2,
-    "env_grayscale": True, # REMOVE
-    "env_noop_max": 30, # REMOVE
+    # "env_grayscale": True, # REMOVE
+    # "env_noop_max": 30, # REMOVE
     "env_time_limit": 10_000, # only during training
-    "env_episodic_lives": True, # REMOVE
-    "env_reward_transform": "tanh", # REMOVE
+    # "env_episodic_lives": True, # REMOVE
+    # "env_reward_transform": "tanh", # REMOVE
     "env_discount_factor": 0.99,
     "env_discount_lambda": 0.95,
 
     # world model
-    "wm_batch_size": 800,
+    "wm_batch_size": 800, # 17GB
     "wm_sequence_length": 16,
     "wm_train_steps": 1,
     "wm_memory_length": 16,
     "wm_discount_threshold": 0.1,
 
-    "z_categoricals": 32,
-    "z_categories": 32,
+    "z_categoricals": 64,
+    "z_categories": 64,
 
     # "obs_channels": 48,
     "obs_act": "silu",

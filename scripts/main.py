@@ -1,10 +1,11 @@
 import argparse
 import random
 from copy import deepcopy
-
+from pathlib import Path
 import numpy as np
 import torch
 import wandb
+from loguru import logger
 
 # experimenting... https://docs.kidger.site/jaxtyping/api/runtime-type-checking/
 from jaxtyping import install_import_hook
@@ -27,6 +28,7 @@ def main(args=None):
         parser.add_argument('--project', type=str, default=None)
         parser.add_argument('--group', type=str, default=None)
         parser.add_argument('--save', action='store_true', default=False)
+        parser.add_argument("--resume", type=Path, default=None)
         args = parser.parse_args()
     else:
         args = argparse.Namespace(**args)
@@ -58,12 +60,18 @@ def main(args=None):
         'game': args.game, 'seed': args.seed, 'model_device': args.device, 'buffer_device': buffer_device,
         'cpu_p': args.cpu_p, 'save': args.save
     })
-    print('CONFIG', args.config, config)
+    logger.info("config_name={args.config} config={config}")
 
     wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb)
     config = dict(wandb.config)
 
     trainer = Trainer(config)
+
+    if args.load:
+        logger.info(f'Loading checkpoint from {args.checkpoint}')
+        state_dict = torch.load(args.checkpoint, map_location=args.device)
+        trainer.agent.load_state_dict(state_dict)
+
     trainer.print_stats()
     try:
         trainer.run()

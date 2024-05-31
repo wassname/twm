@@ -211,7 +211,6 @@ class ObservationModel(nn.Module):
                 num_channels,
                 activation,
                 dropout_p=dropout_p,
-                post_activation=True,
             ),
             nn.Unflatten(1, (frames, num_channels // frames)),
         )

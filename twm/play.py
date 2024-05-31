@@ -4,7 +4,7 @@ from PIL import Image, ImageDraw
 import gym
 import numpy as np
 import torch
-
+from pathlib import Path
 from twm.agent import Agent, Dreamer
 from twm import utils, nets
 # from twm.envs.atari import preprocess_atari_obs
@@ -524,7 +524,7 @@ def play_dream(
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", type=str)
+    parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--mode", type=str, default="dream")
     parser.add_argument("--input", type=str, default="user")
     parser.add_argument("--render_frame_stack", type=str, default="last")
