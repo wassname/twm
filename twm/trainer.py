@@ -181,6 +181,7 @@ class Trainer:
         wandb.log(self.summarizer.summarize())
 
         samples_left_for_training = config["train_it_budget"] - config["pretrain_it_budget"]
+        assert samples_left_for_training>0, "train_it_budget must be greater than pretrain_it_budget"
         samples_per_train_step = 0
         samples_per_train_step += (
             config["wm_train_steps"]
