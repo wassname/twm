@@ -14,20 +14,15 @@ CONFIGS["default"] = {
 
     # evaluation
     "save_every": 100_000,
-    "eval_every": 25000,
+    "eval_every": 15000,
     "eval_episodes": 10,
     "final_eval_episodes": 100,
 
     # environment
     "env_step_budget": 1_000_000, #  was 100k for breakout, 1M or 1B for crafter
     "env_frame_size": 8268, # craftax
-    # "env_frame_skip": 1, # REMOVE
     "env_frame_stack": 2,
-    # "env_grayscale": True, # REMOVE
-    # "env_noop_max": 30, # REMOVE
     "env_time_limit": 10_000, # only during training
-    # "env_episodic_lives": True, # REMOVE
-    # "env_reward_transform": "tanh", # REMOVE
     "env_discount_factor": 0.99,
     "env_discount_lambda": 0.95,
 
@@ -38,8 +33,8 @@ CONFIGS["default"] = {
     "wm_memory_length": 16,
     "wm_discount_threshold": 0.1,
 
-    "z_categoricals": 64,
-    "z_categories": 64,
+    "z_categoricals": 256,
+    "z_categories": 256,
 
     # "obs_channels": 48,
     "obs_act": "silu",

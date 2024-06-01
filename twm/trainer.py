@@ -14,9 +14,7 @@ from twm.replay_buffer import ReplayBuffer
 from twm import utils, metrics
 from twm.envs.craftax import (
     create_craftax_env,
-    craftax_symobs_to_img,
-    create_vector_env,
-    NoAutoReset,
+    craftax_symobs_to_img
 )
 import pandas as pd
 from einops import rearrange, repeat, reduce
