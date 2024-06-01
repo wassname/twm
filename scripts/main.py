@@ -28,7 +28,7 @@ def main(args=None):
         parser.add_argument('--project', type=str, default=None)
         parser.add_argument('--group', type=str, default=None)
         parser.add_argument('--save', action='store_true', default=False)
-        parser.add_argument("--resume", type=Path, default=None)
+        parser.add_argument("--checkpoint", type=Path, default=None)
         args = parser.parse_args()
     else:
         args = argparse.Namespace(**args)
@@ -67,9 +67,9 @@ def main(args=None):
 
     trainer = Trainer(config)
 
-    if args.load:
+    if args.checkpoint:
         logger.info(f'Loading checkpoint from {args.checkpoint}')
-        state_dict = torch.load(args.checkpoint, map_location=args.device)
+        state_dict = torch.load(args.checkpoint, map_location=args.device)['state_dict']
         trainer.agent.load_state_dict(state_dict)
 
     trainer.print_stats()

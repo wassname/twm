@@ -59,7 +59,9 @@ class MetricsSummarizer:
         self.metrics_history = []
         self.except_keys = set() if except_keys is None else set(except_keys)
 
-    def append(self, metrics):
+    def append(self, metrics, prefix=None):
+        if prefix is not None:
+            metrics = {f"{prefix}{key}": value for key, value in metrics.items()}
         self.metrics_history.append(metrics)
 
     def summarize(self):

@@ -157,7 +157,7 @@ class Trainer:
         config = self.config
         replay_buffer = self.replay_buffer
 
-        log_every = 200
+        log_every = 1000
         self.last_eval = 0
         self.total_eval_time = 0
 
@@ -165,9 +165,7 @@ class Trainer:
         random_policy = lambda index: replay_buffer.sample_random_action()
         for _ in tqdm(range(config["buffer_prefill"] - 1), mininterval=mininterval):
             replay_buffer.step(random_policy)
-            metrics_d = {}
-            metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix="buffer/")
-            self.summarizer.append(metrics_d)
+            self.summarizer.append(replay_buffer.metrics(), prefix="buffer/")
             if replay_buffer.size % log_every == 0:
                 wandb.log(self.summarizer.summarize())
 
@@ -209,12 +207,14 @@ class Trainer:
                 eval_metrics = self._evaluate(is_final=False)
                 self.summarizer.append(eval_metrics)
 
-            if config["save"] and (i % config["save_every"] == 0)
-                filename = f"agent_{i}}.pt"
+            if config["save"] and (i % config["save_every"] == 0):
+                filename = f"agent_{i}.pt"
                 self.save(filename)
 
             if i % log_every == 0:
+                self.summarizer.append(replay_buffer.metrics(), prefix="buffer/")
                 wandb.log(self.summarizer.summarize())
+
                 
 
         logger.info("final evaluation")
@@ -229,6 +229,7 @@ class Trainer:
             self.save("agent_final.pt")
 
     def save(self, filename):
+        filename = os.path.join(wandb.run.dir, filename)
         checkpoint = {"config": dict(self.config), "state_dict": self.agent.state_dict()}
         torch.save(checkpoint, filename)
         wandb.save(filename)
@@ -529,16 +530,11 @@ class Trainer:
         # for craftax convert state to image
         o = craftax_symobs_to_img(o.squeeze(1), self.env.unwrapped.env_state)
         recons = craftax_symobs_to_img(recons.squeeze(1), self.env.unwrapped.env_state)
+        recon_img = rearrange([o, recons], 't b h w c -> (t b) c h w') / 255.0
+
         # render observations and reconstructions as two columns
         # the first is the original observation, the second is the reconstruction
         # QC: the reconstruction should look similar
-        # recon_img = [o.permute(0, 3, 1, 2), recons.permute(0, 3, 1, 2)]
-        # recon_img = torch.cat([o, recons], dim=0) / 255.0
-        recon_img = rearrange([o, recons], 't b h w c -> (t b) c h w') / 255.0
-
-        # FIXME:
-        utils.to_image(torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)).save('recon_img1.png')
-
         recon_img = torchvision.utils.make_grid(recon_img, nrow=o.shape[0], padding=2)
         recon_img = utils.to_image(recon_img)
 
@@ -591,34 +587,13 @@ class Trainer:
             craftax_symobs_to_img(o, self.env.unwrapped.env_state)
             .squeeze(2)
         )
+        imagine_img3 = rearrange(imagine_img2, 'b t h w c -> (t b) c h w') / 255.0
+        h, w = imagine_img3.shape[-2:]
 
-        # FIXME: an attempt
-        # imagine_img = rearrange(imagine_img2, 'b t h w c -> (b t) c h w') / 255.0
-        # utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img3.png')
-        # utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))).save('imagine_img4.png')
-
-        imagine_img = rearrange(imagine_img2, 'b t h w c -> (t b) c h w') / 255.0
-        h, w = imagine_img.shape[-2:]
-
-        # FIXME: actually 2 makes more sense after training
-        # utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad))).save('imagine_img1.png')
-        utils.to_image(utils.make_grid(imagine_img, nrow=o.shape[1], padding=(pad + extra_pad, pad))).save('imagine_img2.png')
-
-
-        # imagine_img = utils.make_grid(
-        #     imagine_img, nrow=o.shape[0], padding=(pad + extra_pad, pad)
-        # )
-        imagine_img = utils.to_image(imagine_img[:, extra_pad:])
-
-        # DELETEME
-        # # r [b=5, t=17]
-        # t,i = r.shape
-        # t-=1
-        # i-=1
-        # y = pad + t * (w + pad)
-        # x = pad + i * (h+extra_pad+pad)+h
-        # print(f'image {np.array(imagine_img).shape}, {x},{y}')
-
+        imagine_img4 = utils.make_grid(
+            imagine_img3, nrow=o.shape[1], padding=(pad + extra_pad, pad)
+        )
+        imagine_img = utils.to_image(imagine_img4[:, extra_pad:])
 
         # draw action, reward, and discount on the imagined image for each batch
         draw = ImageDraw.Draw(imagine_img)
@@ -626,17 +601,19 @@ class Trainer:
             for i in range(r.shape[0]): # batch
                 x = pad + t * (w + pad)
                 y = pad + i * (h + extra_pad + pad) + h
-                weight = weights[i, t]
+                weight = weights[i, t] # the reward weights, which typically decrease over time
                 reward = r[i, t]
 
-                if abs(reward) < 1e-4:
+                # we color it based on the reward, and the weight is the lightness of it
+                # TODO: this means it's hard to see at the end of the trajectory
+                if abs(reward) < 1e-4: # very small
                     color_rgb = int(weight * 255)
                     color = (color_rgb, color_rgb, color_rgb)  # white
-                elif reward > 0:
+                elif reward > 0: # positive reward
                     color_rb = int(weight * 100)
                     color_g = int(weight * (255 + reward * 255) / 2)
                     color = (color_rb, color_g, color_rb)  # green
-                else:
+                else: # negative
                     color_gb = int(weight * 80)
                     color_r = int(weight * (255 + (-reward) * 255) / 2)
                     color = (color_r, color_gb, color_gb)  # red
@@ -647,4 +624,7 @@ class Trainer:
                 )
                 draw.text((x + 2, y + 2 + 10), f"r: {r[i, t]: .4f}", fill=color)
                 draw.text((x + 2, y + 2 + 20), f"g: {g[i, t]: .4f}", fill=color)
+        
+        # imagine_img.save('imagine_img.png')
+        # recon_img.save('recon_img.png')
         return recon_img, imagine_img
