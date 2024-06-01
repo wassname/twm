@@ -27,7 +27,7 @@ CONFIGS["default"] = {
     "env_discount_lambda": 0.95,
 
     # world model
-    "wm_batch_size": 800, # 17GB
+    "wm_batch_size": 200, # 17GB
     "wm_sequence_length": 16,
     "wm_train_steps": 1,
     "wm_memory_length": 16,
