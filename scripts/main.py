@@ -58,19 +58,29 @@ def main(args=None):
     config = deepcopy(CONFIGS[args.config])
     config.update({
         'game': args.game, 'seed': args.seed, 'model_device': args.device, 'buffer_device': buffer_device,
-        'cpu_p': args.cpu_p, 'save': args.save
+        'cpu_p': args.cpu_p, 'save': args.save, 'checkpoint': args.checkpoint
     })
-    logger.info("config_name={args.config} config={config}")
+    logger.info(f"config_name={args.config} config={config}")
 
-    wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb)
-    config = dict(wandb.config)
 
     trainer = Trainer(config)
 
     if args.checkpoint:
-        logger.info(f'Loading checkpoint from {args.checkpoint}')
-        state_dict = torch.load(args.checkpoint, map_location=args.device)['state_dict']
+        logger.warning(f'CHEATING: Loading checkpoint from {args.checkpoint}, this means our env steps is wrong')
+        loaded = torch.load(args.checkpoint, map_location=args.device)
+        state_dict = loaded['state_dict']
         trainer.agent.load_state_dict(state_dict)
+        # resume wandb
+
+        config['wandb.run_id'] = "mv00l07m" # HACK
+
+        wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb, resume="must", id=config['wandb.run_id'])
+    else:
+        config['wandb.run_id'] = wandb.run.id
+        config['wandb.run_name'] = wandb.run.name
+
+    wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb)
+    config = dict(wandb.config)
 
     trainer.print_stats()
     try:

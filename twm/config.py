@@ -7,7 +7,7 @@ CONFIGS["default"] = {
     "buffer_prefill": 60_000, # need to be proportional to batch size
 
     # training
-    "train_it_budget": 16_000_000,  # 100k in 10hrs. this seems to be wm+ac training steps. was 1_000_000_000. # 3h, and b=800, 1M
+    "train_it_budget": 600_000_000,  # this counts each sample, in each rollout, and each model, so should be 16*2*env_budget imo
     "pretrain_it_budget": 50_000, # ~20x less
     "pretrain_obs_p": 0.4,
     "pretrain_dyn_p": 0.6,
@@ -27,13 +27,13 @@ CONFIGS["default"] = {
     "env_discount_lambda": 0.95,
 
     # world model
-    "wm_batch_size": 150,
+    "wm_batch_size": 250,
     "wm_sequence_length": 16,
     "wm_train_steps": 1,
     "wm_memory_length": 16,
     "wm_discount_threshold": 0.1,
 
-    "z_categoricals": 256,
+    "z_categoricals": 512,
     "z_categories": 32,
 
     # "obs_channels": 48,
@@ -71,7 +71,7 @@ CONFIGS["default"] = {
     "dyn_discount_coef": 50,
 
     # actor-critic
-    "ac_batch_size": 150,
+    "ac_batch_size": 250,
     "ac_horizon": 15,
     "ac_act": "silu",
     "ac_norm": "none",

@@ -1,7 +1,7 @@
 # import multiprocessing
 import os
 import time
-
+from pathlib import Path
 import numpy as np
 import torch
 import torchvision
@@ -159,9 +159,8 @@ class Trainer:
         self.last_eval = 0
         self.total_eval_time = 0
 
-        logger.info("prefill the buffer with randomly collected data")
         random_policy = lambda index: replay_buffer.sample_random_action()
-        for _ in tqdm(range(config["buffer_prefill"] - 1), mininterval=mininterval):
+        for _ in tqdm(range(config["buffer_prefill"] - 1), mininterval=mininterval, desc='buffer prefil'):
             replay_buffer.step(random_policy)
             self.summarizer.append(replay_buffer.metrics(), prefix="buffer/")
             if replay_buffer.size % log_every == 0:
@@ -173,7 +172,8 @@ class Trainer:
         metrics.update_metrics(metrics_d, replay_buffer.metrics(), prefix="buffer/")
 
         # pretrain on the prefilled data
-        self._pretrain()
+        if not config['checkpoint']:
+            self._pretrain()
 
         eval_metrics = self._evaluate(is_final=False)
         metrics_d.update(eval_metrics)
@@ -225,14 +225,20 @@ class Trainer:
 
         # save final model
         if config["save"]:
-            self.save("agent_final.pt")
+            self.save("agent_final.pt", upload=True)
 
-    def save(self, filename):
-        filename = os.path.join(wandb.run.dir, filename)
+    def save(self, filename, upload=False):
+        old_checkpoints = Path(wandb.run.dir).glob("agent_*.pt")
+        filename = Path(wandb.run.dir) / filename
         checkpoint = {"config": dict(self.config), "state_dict": self.agent.state_dict()}
         torch.save(checkpoint, filename)
-        wandb.save(filename)
-        logger.info(f"saved checkpoint to {filename}")
+        if upload:
+            wandb.save(filename)
+        for old_checkpoint in old_checkpoints:
+            if old_checkpoint==filename:
+                continue
+            os.remove(old_checkpoint)
+        logger.info(f"saved latest checkpoint to `{filename}`")
 
     def _pretrain(self):
         config = self.config
@@ -243,10 +249,9 @@ class Trainer:
         ac = agent.ac
         replay_buffer = self.replay_buffer
 
-        logger.info("pretrain observation model")
         wm_total_batch_size = config["wm_batch_size"] * config["wm_sequence_length"]
         budget = config["pretrain_it_budget"] * config["pretrain_obs_p"]
-        with tqdm(total=int(budget), mininterval=mininterval) as pbar:
+        with tqdm(total=int(budget), mininterval=mininterval, desc='pretrain obs_model') as pbar:
             while budget > 0:
                 indices = torch.randperm(
                     replay_buffer.size, device=replay_buffer.device
@@ -270,9 +275,8 @@ class Trainer:
         with torch.no_grad():
             z_dist = obs_model.eval().encode(o)
 
-        logger.info("pretrain dynamics model")
         budget = config["pretrain_it_budget"] * config["pretrain_dyn_p"]
-        with tqdm(total=int(budget), mininterval=mininterval) as pbar:
+        with tqdm(total=int(budget), mininterval=mininterval, desc='pretrain dyn_model') as pbar:
             while budget > 0:
                 for idx in replay_buffer.generate_uniform_indices(
                     config["wm_batch_size"], config["wm_sequence_length"], extra=2
@@ -297,12 +301,10 @@ class Trainer:
                     if budget <= 0:
                         break
 
-        logger.info("pretrain ac")
         budget = config["pretrain_it_budget"] * (
             1 - config["pretrain_obs_p"] + config["pretrain_dyn_p"]
         )
-        # TODO can this be a for loop?
-        with tqdm(total=budget * 1, mininterval=mininterval) as pbar:
+        with tqdm(total=budget * 1, mininterval=mininterval, desc='pretrain ac') as pbar:
             while budget > 0:
                 for idx in replay_buffer.generate_uniform_indices(
                     config["ac_batch_size"], config["ac_horizon"], extra=2
