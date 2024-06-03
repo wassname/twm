@@ -18,7 +18,7 @@ with install_import_hook("main", "beartype.beartype"):
 def main(args=None):
     if args is None:
         parser = argparse.ArgumentParser()
-        parser.add_argument('--game', type=str, default="Craftax-Symbolic-v1")
+        parser.add_argument('--game', type=str, default="Craftax-Symbolic-AutoReset-v1")
         parser.add_argument('--config', type=str, default='default')
         parser.add_argument('--seed', type=int, default=42)
         parser.add_argument('--device', type=str, default='cuda')
@@ -76,10 +76,10 @@ def main(args=None):
 
         wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb, resume="must", id=config['wandb.run_id'])
     else:
+        wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb)
         config['wandb.run_id'] = wandb.run.id
         config['wandb.run_name'] = wandb.run.name
 
-    wandb.init(config=config, project=args.project, group=args.group, mode=args.wandb)
     config = dict(wandb.config)
 
     trainer.print_stats()
