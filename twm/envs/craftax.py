@@ -156,7 +156,7 @@ def create_craftax_env(
     """
     assert 'AutoReset' in game, f"Only AutoReset games supported, got {game}"
     # see https://github.dev/MichaelTMatthews/Craftax_Baselines/blob/main/ppo_rnn.py
-    env = make_craftax_env_from_name(game), auto_reset=True
+    env = make_craftax_env_from_name(game, auto_reset=True)
     if num_envs > 1:
         # FIXME: naive optimistic resets don't work well with multiple envs see OptimisticResetVecEnvWrapper
         env = GymnaxToVectorGymWrapper(env, seed=seed, num_envs=num_envs)
@@ -168,7 +168,7 @@ def create_craftax_env(
     # We have to vectorise using jax earlier as there is not framestack wrapepr avaiable for jax
     # but then the framestack dim is before the env dim [framestack, batch, obs_dim] so lets swap those
     env = FrameStackObservation(env, frame_stack)
-    if num_envs > 1:make_craftax_env_from_name
+    if num_envs > 1:
         env = permute_env(env, [1, 0, 2])
 
     # env.unwrapped.spec = gym.spec(game) # required for AtariPreprocessing
