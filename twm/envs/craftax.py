@@ -108,20 +108,25 @@ class CraftaxRenderWrapper(gymnasium.core.Wrapper):
                 self.env, self.env_params, pixel_render_size=1
             )
         self.renderer = None
+        self.last_info = None
 
     def step(self, *args, **kwargs):
-        o = self.env.step(*args, **kwargs)
+        obs, state, reward, done, info = self.env.step(*args, **kwargs)
         if self.renderer is not None:
             self.renderer.update()
-        return o
+        self.last_info = info
+        return obs, state, reward, done, info
 
     def reset(self, *args, **kwargs):
-        o, info = self.env.reset(*args, **kwargs)
-        stats = " / ".join(f"{k.replace('log_achievement_', '')} <red>{v:.1f}</red>" for k, v in info)
-        logger.opt(colors=True).info(f"CraftaxRenderWrapper reset info:  {stats}")
+        o = self.env.reset(*args, **kwargs)
         if self.renderer is not None:
             self.renderer.update()
-        return o, info
+
+        if self.last_info is not None:
+            # TODO: move to a seperate wrapper
+            stats = " | ".join(f"{k.replace('Achievements/', '')} <red>{v:.1f}</red>" for k, v in self.last_info.items())
+            logger.opt(colors=True).debug(f"info: {stats}")
+        return o
 
     def render(self, mode="rgb_array"):
         o = self.env.render()
@@ -139,8 +144,9 @@ class CraftaxRenderWrapper(gymnasium.core.Wrapper):
             self.renderer.close()
 
 
+
 def create_craftax_env(
-    game, frame_stack=4, time_limit=27000, seed=42, eval=False, num_envs=1
+    game="Craftax-Symbolic-AutoReset-v1", frame_stack=4, time_limit=27000, seed=42, eval=False, num_envs=1
 ):
     """
     Craftax with
@@ -148,7 +154,7 @@ def create_craftax_env(
     time_limit = 27000
 
     """
-    game = "Craftax-Symbolic-AutoReset-v1"
+    assert 'AutoReset' in game, f"Only AutoReset games supported, got {game}"
     # see https://github.dev/MichaelTMatthews/Craftax_Baselines/blob/main/ppo_rnn.py
     env = make_craftax_env_from_name(game)
     if num_envs > 1:
