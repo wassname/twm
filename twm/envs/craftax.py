@@ -5,7 +5,6 @@ import chex
 import numpy as np
 from flax import struct
 from functools import partial
-from typing import Optional, Tuple, Union, Any, Dict
 from craftax.craftax_env import make_craftax_env_from_name
 from craftax.craftax.play_craftax import CraftaxRenderer
 from craftax.craftax.renderer import (
@@ -13,16 +12,18 @@ from craftax.craftax.renderer import (
     render_craftax_text,
     inverse_render_craftax_symbolic,
 )
+from loguru import logger
 from craftax.craftax.constants import Action
 from craftax.craftax.craftax_state import EnvState
 import gymnasium
-from gymnasium.wrappers.jax_to_numpy import numpy_to_jax, jax_to_numpy
+# from gymnasium.wrappers.jax_to_numpy import numpy_to_jax, jax_to_numpy
 from gymnasium.wrappers.jax_to_torch import jax_to_torch, torch_to_jax
 from gymnasium.wrappers.numpy_to_torch import numpy_to_torch, torch_to_numpy
 from gymnasium.wrappers import FrameStackObservation, TimeLimit, JaxToTorch
 import gymnasium.spaces as gym_spaces
 from twm.envs.gymnax2gymnasium import GymnaxToGymWrapper, GymnaxToVectorGymWrapper
 import torch
+from typing import Optional, Tuple, Union, Any, Dict
 from jaxtyping import Float, Int, Bool
 from torch import Tensor
 from twm.custom_types import Obs, TrcBool, TrcFloat, TrceInt
@@ -115,10 +116,12 @@ class CraftaxRenderWrapper(gymnasium.core.Wrapper):
         return o
 
     def reset(self, *args, **kwargs):
-        o = self.env.reset(*args, **kwargs)
+        o, info = self.env.reset(*args, **kwargs)
+        stats = " / ".join(f"{k.replace('log_achievement_', '')} <red>{v:.1f}</red>" for k, v in info)
+        logger.opt(colors=True).info(f"CraftaxRenderWrapper reset info:  {stats}")
         if self.renderer is not None:
             self.renderer.update()
-        return o
+        return o, info
 
     def render(self, mode="rgb_array"):
         o = self.env.render()
@@ -145,9 +148,9 @@ def create_craftax_env(
     time_limit = 27000
 
     """
-    game = "Craftax-Symbolic-v1"
+    game = "Craftax-Symbolic-AutoReset-v1"
     # see https://github.dev/MichaelTMatthews/Craftax_Baselines/blob/main/ppo_rnn.py
-    env = make_craftax_env_from_name(game, auto_reset=not eval)
+    env = make_craftax_env_from_name(game)
     if num_envs > 1:
         # FIXME: naive optimistic resets don't work well with multiple envs see OptimisticResetVecEnvWrapper
         env = GymnaxToVectorGymWrapper(env, seed=seed, num_envs=num_envs)
@@ -176,195 +179,195 @@ Below files from https://github.dev/MichaelTMatthews/Craftax_Baselines/wrappers.
 """
 
 
-class GymnaxWrapper(object):
-    """Base class for Gymnax wrappers."""
+# class GymnaxWrapper(object):
+#     """Base class for Gymnax wrappers."""
 
-    def __init__(self, env):
-        self._env = env
+#     def __init__(self, env):
+#         self._env = env
 
-    # provide proxy access to regular attributes of wrapped object
-    def __getattr__(self, name):
-        return getattr(self._env, name)
-
-
-class BatchEnvWrapper(GymnaxWrapper):
-    """Batches reset and step functions"""
-
-    def __init__(self, env, num_envs: int):
-        super().__init__(env)
-
-        self.num_envs = num_envs
-
-        self.reset_fn = jax.vmap(self._env.reset, in_axes=(0, None))
-        self.step_fn = jax.vmap(self._env.step, in_axes=(0, 0, 0, None))
-
-    @partial(jax.jit, static_argnums=(0, 2))
-    def reset(self, rng, params=None):
-        rng, _rng = jax.random.split(rng)
-        rngs = jax.random.split(_rng, self.num_envs)
-        obs, env_state = self.reset_fn(rngs, params)
-        return obs, env_state
-
-    @partial(jax.jit, static_argnums=(0, 4))
-    def step(self, rng, state, action, params=None):
-        rng, _rng = jax.random.split(rng)
-        rngs = jax.random.split(_rng, self.num_envs)
-        obs, state, reward, done, info = self.step_fn(rngs, state, action, params)
-
-        return obs, state, reward, done, info
+#     # provide proxy access to regular attributes of wrapped object
+#     def __getattr__(self, name):
+#         return getattr(self._env, name)
 
 
-class AutoResetEnvWrapper(GymnaxWrapper):
-    """Provides standard auto-reset functionality, providing the same behaviour as Gymnax-default."""
+# class BatchEnvWrapper(GymnaxWrapper):
+#     """Batches reset and step functions"""
 
-    def __init__(self, env):
-        super().__init__(env)
+#     def __init__(self, env, num_envs: int):
+#         super().__init__(env)
 
-    @partial(jax.jit, static_argnums=(0, 2))
-    def reset(self, key, params=None):
-        return self._env.reset(key, params)
+#         self.num_envs = num_envs
 
-    @partial(jax.jit, static_argnums=(0, 4))
-    def step(self, rng, state, action, params=None):
-        rng, _rng = jax.random.split(rng)
-        obs_st, state_st, reward, done, info = self._env.step(
-            _rng, state, action, params
-        )
+#         self.reset_fn = jax.vmap(self._env.reset, in_axes=(0, None))
+#         self.step_fn = jax.vmap(self._env.step, in_axes=(0, 0, 0, None))
 
-        rng, _rng = jax.random.split(rng)
-        obs_re, state_re = self._env.reset(_rng, params)
+#     @partial(jax.jit, static_argnums=(0, 2))
+#     def reset(self, rng, params=None):
+#         rng, _rng = jax.random.split(rng)
+#         rngs = jax.random.split(_rng, self.num_envs)
+#         obs, env_state = self.reset_fn(rngs, params)
+#         return obs, env_state
 
-        # Auto-reset environment based on termination
-        def auto_reset(done, state_re, state_st, obs_re, obs_st):
-            state = jax.tree_map(
-                lambda x, y: jax.lax.select(done, x, y), state_re, state_st
-            )
-            obs = jax.lax.select(done, obs_re, obs_st)
+#     @partial(jax.jit, static_argnums=(0, 4))
+#     def step(self, rng, state, action, params=None):
+#         rng, _rng = jax.random.split(rng)
+#         rngs = jax.random.split(_rng, self.num_envs)
+#         obs, state, reward, done, info = self.step_fn(rngs, state, action, params)
 
-            return obs, state
-
-        obs, state = auto_reset(done, state_re, state_st, obs_re, obs_st)
-
-        return obs, state, reward, done, info
+#         return obs, state, reward, done, info
 
 
-class OptimisticResetVecEnvWrapper(GymnaxWrapper):
-    """
-    Provides efficient 'optimistic' resets.
-    The wrapper also necessarily handles the batching of environment steps and resetting.
-    reset_ratio: the number of environment workers per environment reset.  Higher means more efficient but a higher
-    chance of duplicate resets.
-    """
+# class AutoResetEnvWrapper(GymnaxWrapper):
+#     """Provides standard auto-reset functionality, providing the same behaviour as Gymnax-default."""
 
-    def __init__(self, env, num_envs: int, reset_ratio: int):
-        super().__init__(env)
+#     def __init__(self, env):
+#         super().__init__(env)
 
-        self.num_envs = num_envs
-        self.reset_ratio = reset_ratio
-        assert (
-            num_envs % reset_ratio == 0
-        ), "Reset ratio must perfectly divide num envs."
-        self.num_resets = self.num_envs // reset_ratio
+#     @partial(jax.jit, static_argnums=(0, 2))
+#     def reset(self, key, params=None):
+#         return self._env.reset(key, params)
 
-        self.reset_fn = jax.vmap(self._env.reset, in_axes=(0, None))
-        self.step_fn = jax.vmap(self._env.step, in_axes=(0, 0, 0, None))
+#     @partial(jax.jit, static_argnums=(0, 4))
+#     def step(self, rng, state, action, params=None):
+#         rng, _rng = jax.random.split(rng)
+#         obs_st, state_st, reward, done, info = self._env.step(
+#             _rng, state, action, params
+#         )
 
-    @partial(jax.jit, static_argnums=(0, 2))
-    def reset(self, rng, params=None):
-        rng, _rng = jax.random.split(rng)
-        rngs = jax.random.split(_rng, self.num_envs)
-        obs, env_state = self.reset_fn(rngs, params)
-        return obs, env_state
+#         rng, _rng = jax.random.split(rng)
+#         obs_re, state_re = self._env.reset(_rng, params)
 
-    @partial(jax.jit, static_argnums=(0, 4))
-    def step(self, rng, state, action, params=None):
-        rng, _rng = jax.random.split(rng)
-        rngs = jax.random.split(_rng, self.num_envs)
-        obs_st, state_st, reward, done, info = self.step_fn(rngs, state, action, params)
+#         # Auto-reset environment based on termination
+#         def auto_reset(done, state_re, state_st, obs_re, obs_st):
+#             state = jax.tree_map(
+#                 lambda x, y: jax.lax.select(done, x, y), state_re, state_st
+#             )
+#             obs = jax.lax.select(done, obs_re, obs_st)
 
-        rng, _rng = jax.random.split(rng)
-        rngs = jax.random.split(_rng, self.num_resets)
-        obs_re, state_re = self.reset_fn(rngs, params)
+#             return obs, state
 
-        rng, _rng = jax.random.split(rng)
-        reset_indexes = jnp.arange(self.num_resets).repeat(self.reset_ratio)
+#         obs, state = auto_reset(done, state_re, state_st, obs_re, obs_st)
 
-        being_reset = jax.random.choice(
-            _rng,
-            jnp.arange(self.num_envs),
-            shape=(self.num_resets,),
-            p=done,
-            replace=False,
-        )
-        reset_indexes = reset_indexes.at[being_reset].set(jnp.arange(self.num_resets))
-
-        obs_re = obs_re[reset_indexes]
-        state_re = jax.tree_map(lambda x: x[reset_indexes], state_re)
-
-        # Auto-reset environment based on termination
-        def auto_reset(done, state_re, state_st, obs_re, obs_st):
-            state = jax.tree_map(
-                lambda x, y: jax.lax.select(done, x, y), state_re, state_st
-            )
-            obs = jax.lax.select(done, obs_re, obs_st)
-
-            return state, obs
-
-        state, obs = jax.vmap(auto_reset)(done, state_re, state_st, obs_re, obs_st)
-
-        return obs, state, reward, done, info
+#         return obs, state, reward, done, info
 
 
-@struct.dataclass
-class LogEnvState:
-    env_state: Any
-    episode_returns: float
-    episode_lengths: int
-    returned_episode_returns: float
-    returned_episode_lengths: int
-    timestep: int
+# class OptimisticResetVecEnvWrapper(GymnaxWrapper):
+#     """
+#     Provides efficient 'optimistic' resets.
+#     The wrapper also necessarily handles the batching of environment steps and resetting.
+#     reset_ratio: the number of environment workers per environment reset.  Higher means more efficient but a higher
+#     chance of duplicate resets.
+#     """
+
+#     def __init__(self, env, num_envs: int, reset_ratio: int):
+#         super().__init__(env)
+
+#         self.num_envs = num_envs
+#         self.reset_ratio = reset_ratio
+#         assert (
+#             num_envs % reset_ratio == 0
+#         ), "Reset ratio must perfectly divide num envs."
+#         self.num_resets = self.num_envs // reset_ratio
+
+#         self.reset_fn = jax.vmap(self._env.reset, in_axes=(0, None))
+#         self.step_fn = jax.vmap(self._env.step, in_axes=(0, 0, 0, None))
+
+#     @partial(jax.jit, static_argnums=(0, 2))
+#     def reset(self, rng, params=None):
+#         rng, _rng = jax.random.split(rng)
+#         rngs = jax.random.split(_rng, self.num_envs)
+#         obs, env_state = self.reset_fn(rngs, params)
+#         return obs, env_state
+
+#     @partial(jax.jit, static_argnums=(0, 4))
+#     def step(self, rng, state, action, params=None):
+#         rng, _rng = jax.random.split(rng)
+#         rngs = jax.random.split(_rng, self.num_envs)
+#         obs_st, state_st, reward, done, info = self.step_fn(rngs, state, action, params)
+
+#         rng, _rng = jax.random.split(rng)
+#         rngs = jax.random.split(_rng, self.num_resets)
+#         obs_re, state_re = self.reset_fn(rngs, params)
+
+#         rng, _rng = jax.random.split(rng)
+#         reset_indexes = jnp.arange(self.num_resets).repeat(self.reset_ratio)
+
+#         being_reset = jax.random.choice(
+#             _rng,
+#             jnp.arange(self.num_envs),
+#             shape=(self.num_resets,),
+#             p=done,
+#             replace=False,
+#         )
+#         reset_indexes = reset_indexes.at[being_reset].set(jnp.arange(self.num_resets))
+
+#         obs_re = obs_re[reset_indexes]
+#         state_re = jax.tree_map(lambda x: x[reset_indexes], state_re)
+
+#         # Auto-reset environment based on termination
+#         def auto_reset(done, state_re, state_st, obs_re, obs_st):
+#             state = jax.tree_map(
+#                 lambda x, y: jax.lax.select(done, x, y), state_re, state_st
+#             )
+#             obs = jax.lax.select(done, obs_re, obs_st)
+
+#             return state, obs
+
+#         state, obs = jax.vmap(auto_reset)(done, state_re, state_st, obs_re, obs_st)
+
+#         return obs, state, reward, done, info
 
 
-class LogWrapper(GymnaxWrapper):
-    """Log the episode returns and lengths."""
+# @struct.dataclass
+# class LogEnvState:
+#     env_state: Any
+#     episode_returns: float
+#     episode_lengths: int
+#     returned_episode_returns: float
+#     returned_episode_lengths: int
+#     timestep: int
 
-    def __init__(self, env):
-        super().__init__(env)
 
-    @partial(jax.jit, static_argnums=(0, 2))
-    def reset(self, rng: chex.PRNGKey, params=None):
-        obs, env_state = self._env.reset(rng, params)
-        state = LogEnvState(env_state, 0.0, 0, 0.0, 0, 0)
-        return obs, state
+# class LogWrapper(GymnaxWrapper):
+#     """Log the episode returns and lengths."""
 
-    @partial(jax.jit, static_argnums=(0, 4))
-    def step(
-        self,
-        key: chex.PRNGKey,
-        state,
-        action: Union[int, float],
-        params=None,
-    ):
-        obs, env_state, reward, done, info = self._env.step(
-            key, state.env_state, action, params
-        )
-        new_episode_return = state.episode_returns + reward
-        new_episode_length = state.episode_lengths + 1
-        state = LogEnvState(
-            env_state=env_state,
-            episode_returns=new_episode_return * (1 - done),
-            episode_lengths=new_episode_length * (1 - done),
-            returned_episode_returns=state.returned_episode_returns * (1 - done)
-            + new_episode_return * done,
-            returned_episode_lengths=state.returned_episode_lengths * (1 - done)
-            + new_episode_length * done,
-            timestep=state.timestep + 1,
-        )
-        info["returned_episode_returns"] = state.returned_episode_returns
-        info["returned_episode_lengths"] = state.returned_episode_lengths
-        info["timestep"] = state.timestep
-        info["returned_episode"] = done
-        return obs, state, reward, done, info
+#     def __init__(self, env):
+#         super().__init__(env)
+
+#     @partial(jax.jit, static_argnums=(0, 2))
+#     def reset(self, rng: chex.PRNGKey, params=None):
+#         obs, env_state = self._env.reset(rng, params)
+#         state = LogEnvState(env_state, 0.0, 0, 0.0, 0, 0)
+#         return obs, state
+
+#     @partial(jax.jit, static_argnums=(0, 4))
+#     def step(
+#         self,
+#         key: chex.PRNGKey,
+#         state,
+#         action: Union[int, float],
+#         params=None,
+#     ):
+#         obs, env_state, reward, done, info = self._env.step(
+#             key, state.env_state, action, params
+#         )
+#         new_episode_return = state.episode_returns + reward
+#         new_episode_length = state.episode_lengths + 1
+#         state = LogEnvState(
+#             env_state=env_state,
+#             episode_returns=new_episode_return * (1 - done),
+#             episode_lengths=new_episode_length * (1 - done),
+#             returned_episode_returns=state.returned_episode_returns * (1 - done)
+#             + new_episode_return * done,
+#             returned_episode_lengths=state.returned_episode_lengths * (1 - done)
+#             + new_episode_length * done,
+#             timestep=state.timestep + 1,
+#         )
+#         info["returned_episode_returns"] = state.returned_episode_returns
+#         info["returned_episode_lengths"] = state.returned_episode_lengths
+#         info["timestep"] = state.timestep
+#         info["returned_episode"] = done
+#         return obs, state, reward, done, info
 
 
 def craftax_symobs_to_img(
@@ -388,27 +391,27 @@ def craftax_symobs_to_img(
     return im
 
 
-def create_vector_env(num_envs, env):
-    # TODO: wait isn't this meant to be used before gymax2gymnasium?
-    return BatchEnvWrapper(env, num_envs=num_envs)
+# def create_vector_env(num_envs, env):
+#     # TODO: wait isn't this meant to be used before gymax2gymnasium?
+#     return BatchEnvWrapper(env, num_envs=num_envs)
 
 
-class NoAutoReset(gymnasium.Wrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        self.final_observation = None
-        self.final_info = None
+# class NoAutoReset(gymnasium.Wrapper):
+#     def __init__(self, env):
+#         super().__init__(env)
+#         self.final_observation = None
+#         self.final_info = None
 
-    def reset(self, seed=None, options=None):
-        if self.final_observation is None or (
-            options is not None and options.get("force", False)
-        ):
-            return self.env.reset(seed=seed, options=options)
-        return self.final_observation, self.final_info
+#     def reset(self, seed=None, options=None):
+#         if self.final_observation is None or (
+#             options is not None and options.get("force", False)
+#         ):
+#             return self.env.reset(seed=seed, options=options)
+#         return self.final_observation, self.final_info
 
-    def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        if terminated or truncated:
-            self.final_observation = obs
-            self.final_info = info
-        return obs, reward, terminated, truncated, info
+#     def step(self, action):
+#         obs, reward, terminated, truncated, info = self.env.step(action)
+#         if terminated or truncated:
+#             self.final_observation = obs
+#             self.final_info = info
+#         return obs, reward, terminated, truncated, info

@@ -1,8 +1,12 @@
 
+set export
+export OSTYPE := "linux-gnu"
+export TQDM_MININTERVAL := "30"
 
 main:
     . .venv/bin/activate
-    TQDM_MININTERVAL=30 python -O scripts/main.py \
+    echo $(which python)
+    python -O scripts/main.py \
         --wandb=online \
         --save \
         --checkpoint './wandb/run-20240601_211958-mv00l07m/files/agent_final.pt'
